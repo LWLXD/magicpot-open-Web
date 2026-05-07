@@ -488,11 +488,13 @@ describe('ProjectCanvasWebGLImageLayer', () => {
     await waitFor(
       () => {
         expect(ref.current).not.toBeNull()
+        expect(createdApplications).toHaveLength(1)
         expect(createdSprites).toHaveLength(1)
       },
       { timeout: 15000 }
     )
 
+    const app = createdApplications[0]
     const sprite = createdSprites[0]
 
     expect(sprite.position.x).toBe(24)
@@ -500,6 +502,7 @@ describe('ProjectCanvasWebGLImageLayer', () => {
     expect(sprite.scale.x).toBe(2)
     expect(sprite.scale.y).toBe(2)
 
+    const renderCountBeforePreview = app.render.mock.calls.length
     act(() => {
       ref.current?.syncItemPreview('image-1', {
         x: 80,
@@ -517,7 +520,9 @@ describe('ProjectCanvasWebGLImageLayer', () => {
     expect(sprite.scale.x).toBe(3)
     expect(sprite.scale.y).toBe(1)
     expect(sprite.rotation).toBeCloseTo(Math.PI / 12)
+    expect(app.render).toHaveBeenCalledTimes(renderCountBeforePreview + 1)
 
+    const renderCountBeforeClear = app.render.mock.calls.length
     act(() => {
       ref.current?.syncItemPreview('image-1', null)
     })
@@ -527,6 +532,7 @@ describe('ProjectCanvasWebGLImageLayer', () => {
     expect(sprite.scale.x).toBe(2)
     expect(sprite.scale.y).toBe(2)
     expect(sprite.rotation).toBe(0)
+    expect(app.render).toHaveBeenCalledTimes(renderCountBeforeClear + 1)
   }, 15000)
 
   it('recreates sprite state when the texture key changes', async () => {
@@ -1311,11 +1317,13 @@ describe('ProjectCanvasWebGLImageLayer', () => {
 
   it('defers metrics reports while viewport interaction is active', async () => {
     const { default: ProjectCanvasWebGLImageLayer } = await import('./ProjectCanvasWebGLImageLayer')
+    const ref = React.createRef<ProjectCanvasWebGLImageLayerHandle>()
     const metricsCalls: ProjectCanvasWebGLImageLayerMetrics[] = []
     const stableItems = [createItem({ id: 'image-metrics-interacting' })]
 
     const { rerender } = render(
       <ProjectCanvasWebGLImageLayer
+        ref={ref}
         items={stableItems}
         stagePos={{ x: 0, y: 0 }}
         stageScale={1}
@@ -1327,10 +1335,16 @@ describe('ProjectCanvasWebGLImageLayer', () => {
 
     await waitFor(
       () => {
+        expect(ref.current).not.toBeNull()
         expect(createdSprites).toHaveLength(1)
       },
       { timeout: 15000 }
     )
+
+    act(() => {
+      ref.current?.syncViewport({ x: 96, y: 72 }, 1.25)
+      ref.current?.syncViewport({ x: 120, y: 96 }, 1.25)
+    })
 
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 300))
@@ -1340,6 +1354,7 @@ describe('ProjectCanvasWebGLImageLayer', () => {
 
     rerender(
       <ProjectCanvasWebGLImageLayer
+        ref={ref}
         items={stableItems}
         stagePos={{ x: 0, y: 0 }}
         stageScale={1}
@@ -1353,7 +1368,10 @@ describe('ProjectCanvasWebGLImageLayer', () => {
       () => {
         expect(
           metricsCalls.some(
-            (metrics) => metrics.imageCount === 1 && metrics.residentImageCount === 1
+            (metrics) =>
+              metrics.imageCount === 1 &&
+              metrics.residentImageCount === 1 &&
+              metrics.renderCount >= 2
           )
         ).toBe(true)
       },
@@ -2334,7 +2352,10 @@ describe('ProjectCanvasWebGLImageLayer', () => {
       await waitFor(
         () => {
           expect(createdSprites.filter((sprite) => !sprite.destroyed)).toHaveLength(4)
-          expect(attemptedSrcs).toEqual(['file:///image-hires-queued-1.png'])
+          expect(attemptedSrcs).toEqual([
+            'file:///image-hires-queued-1.png',
+            'file:///image-hires-queued-2.png'
+          ])
         },
         { timeout: 15000 }
       )
@@ -2347,7 +2368,8 @@ describe('ProjectCanvasWebGLImageLayer', () => {
         () => {
           expect(attemptedSrcs).toEqual([
             'file:///image-hires-queued-1.png',
-            'file:///image-hires-queued-2.png'
+            'file:///image-hires-queued-2.png',
+            'file:///image-hires-queued-3.png'
           ])
         },
         { timeout: 15000 }
@@ -2362,7 +2384,8 @@ describe('ProjectCanvasWebGLImageLayer', () => {
           expect(attemptedSrcs).toEqual([
             'file:///image-hires-queued-1.png',
             'file:///image-hires-queued-2.png',
-            'file:///image-hires-queued-3.png'
+            'file:///image-hires-queued-3.png',
+            'file:///image-hires-queued-4.png'
           ])
         },
         { timeout: 15000 }
@@ -2453,7 +2476,10 @@ describe('ProjectCanvasWebGLImageLayer', () => {
 
       await waitFor(
         () => {
-          expect(attemptedSrcs).toEqual(['file:///image-upgrade-selected.png'])
+          expect(attemptedSrcs).toEqual([
+            'file:///image-upgrade-selected.png',
+            'file:///image-upgrade-center.png'
+          ])
         },
         { timeout: 15000 }
       )
@@ -2466,7 +2492,8 @@ describe('ProjectCanvasWebGLImageLayer', () => {
         () => {
           expect(attemptedSrcs).toEqual([
             'file:///image-upgrade-selected.png',
-            'file:///image-upgrade-center.png'
+            'file:///image-upgrade-center.png',
+            'file:///image-upgrade-edge.png'
           ])
         },
         { timeout: 15000 }
@@ -3100,7 +3127,10 @@ describe('ProjectCanvasWebGLImageLayer', () => {
 
       await waitFor(
         () => {
-          expect(attemptedSrcs).toEqual(['file:///image-stale-upgrade-1.png'])
+          expect(attemptedSrcs).toEqual([
+            'file:///image-stale-upgrade-1.png',
+            'file:///image-stale-upgrade-2.png'
+          ])
         },
         { timeout: 15000 }
       )
@@ -3126,7 +3156,10 @@ describe('ProjectCanvasWebGLImageLayer', () => {
         await Promise.resolve()
       })
 
-      expect(attemptedSrcs).toEqual(['file:///image-stale-upgrade-1.png'])
+      expect(attemptedSrcs).toEqual([
+        'file:///image-stale-upgrade-1.png',
+        'file:///image-stale-upgrade-2.png'
+      ])
     } finally {
       vi.unstubAllGlobals()
     }
@@ -3958,6 +3991,75 @@ describe('ProjectCanvasWebGLImageLayer', () => {
     }
   }, 30000)
 
+  it('creates resident sprites in stable row-major order instead of center-out rings', async () => {
+    const {
+      PROJECT_CANVAS_WEBGL_SPRITE_RECONCILE_BATCH_SIZE,
+      default: ProjectCanvasWebGLImageLayer
+    } = await import('./ProjectCanvasWebGLImageLayer')
+    const queuedAnimationFrames = new Map<number, FrameRequestCallback>()
+    let nextAnimationFrameId = 1
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback: FrameRequestCallback) => {
+        const id = nextAnimationFrameId
+        nextAnimationFrameId += 1
+        queuedAnimationFrames.set(id, callback)
+        return id
+      })
+    const cancelAnimationFrameSpy = vi
+      .spyOn(window, 'cancelAnimationFrame')
+      .mockImplementation((id: number) => {
+        queuedAnimationFrames.delete(id)
+      })
+    const orderedItems = Array.from(
+      { length: PROJECT_CANVAS_WEBGL_SPRITE_RECONCILE_BATCH_SIZE * 3 },
+      (_, index) =>
+        createItem({
+          id: `image-row-major-${index + 1}`,
+          src: `file:///image-row-major-${index + 1}.png`,
+          fileName: `image-row-major-${index + 1}.png`,
+          x: (index % 6) * 96,
+          y: Math.floor(index / 6) * 72,
+          width: 80,
+          height: 48,
+          zIndex: index
+        })
+    )
+
+    try {
+      render(
+        <ProjectCanvasWebGLImageLayer
+          items={orderedItems}
+          stagePos={{ x: 0, y: 0 }}
+          stageScale={1}
+          stageSize={{ width: 1280, height: 720 }}
+        />
+      )
+
+      await waitFor(
+        () => {
+          expect(createdSprites.filter((sprite) => !sprite.destroyed)).toHaveLength(
+            PROJECT_CANVAS_WEBGL_SPRITE_RECONCILE_BATCH_SIZE
+          )
+        },
+        { timeout: 15000 }
+      )
+
+      expect(
+        createdSprites
+          .slice(0, PROJECT_CANVAS_WEBGL_SPRITE_RECONCILE_BATCH_SIZE)
+          .map((sprite) => sprite.label)
+      ).toEqual(
+        orderedItems
+          .slice(0, PROJECT_CANVAS_WEBGL_SPRITE_RECONCILE_BATCH_SIZE)
+          .map((item) => item.id)
+      )
+    } finally {
+      requestAnimationFrameSpy.mockRestore()
+      cancelAnimationFrameSpy.mockRestore()
+    }
+  }, 30000)
+
   it('splits large initial sprite creation across animation frames to avoid one long first render', async () => {
     const {
       PROJECT_CANVAS_WEBGL_SPRITE_RECONCILE_BATCH_SIZE,
@@ -3978,10 +4080,27 @@ describe('ProjectCanvasWebGLImageLayer', () => {
       .mockImplementation((id: number) => {
         queuedAnimationFrames.delete(id)
       })
-    const flushAnimationFrames = () => {
-      const callbacks = Array.from(queuedAnimationFrames.values())
-      queuedAnimationFrames.clear()
-      callbacks.forEach((callback) => callback(window.performance.now()))
+    const flushNextAnimationFrame = () => {
+      const nextFrame = queuedAnimationFrames.entries().next().value
+      if (!nextFrame) {
+        return false
+      }
+
+      const [id, callback] = nextFrame
+      queuedAnimationFrames.delete(id)
+      callback(window.performance.now())
+      return true
+    }
+    const liveSpriteCount = () => createdSprites.filter((sprite) => !sprite.destroyed).length
+    const flushUntilLiveSpriteCount = async (expectedCount: number) => {
+      for (let index = 0; index < 12 && liveSpriteCount() !== expectedCount; index += 1) {
+        await act(async () => {
+          expect(flushNextAnimationFrame()).toBe(true)
+          await Promise.resolve()
+        })
+      }
+
+      expect(liveSpriteCount()).toBe(expectedCount)
     }
     const metricsCalls: ProjectCanvasWebGLImageLayerMetrics[] = []
     const largeItemSet = createItems(PROJECT_CANVAS_WEBGL_SPRITE_RECONCILE_BATCH_SIZE * 3)
@@ -4015,16 +4134,7 @@ describe('ProjectCanvasWebGLImageLayer', () => {
         )
       ).toBe(false)
 
-      act(flushAnimationFrames)
-
-      await waitFor(
-        () => {
-          expect(createdSprites.filter((sprite) => !sprite.destroyed)).toHaveLength(
-            PROJECT_CANVAS_WEBGL_SPRITE_RECONCILE_BATCH_SIZE * 2
-          )
-        },
-        { timeout: 15000 }
-      )
+      await flushUntilLiveSpriteCount(PROJECT_CANVAS_WEBGL_SPRITE_RECONCILE_BATCH_SIZE * 2)
 
       expect(
         metricsCalls.some(
@@ -4035,16 +4145,7 @@ describe('ProjectCanvasWebGLImageLayer', () => {
         )
       ).toBe(false)
 
-      act(flushAnimationFrames)
-
-      await waitFor(
-        () => {
-          expect(createdSprites.filter((sprite) => !sprite.destroyed)).toHaveLength(
-            largeItemSet.length
-          )
-        },
-        { timeout: 15000 }
-      )
+      await flushUntilLiveSpriteCount(largeItemSet.length)
 
       expect(
         metricsCalls.some(
@@ -4082,10 +4183,27 @@ describe('ProjectCanvasWebGLImageLayer', () => {
       .mockImplementation((id: number) => {
         queuedAnimationFrames.delete(id)
       })
-    const flushAnimationFrames = () => {
-      const callbacks = Array.from(queuedAnimationFrames.values())
-      queuedAnimationFrames.clear()
-      callbacks.forEach((callback) => callback(window.performance.now()))
+    const flushNextAnimationFrame = () => {
+      const nextFrame = queuedAnimationFrames.entries().next().value
+      if (!nextFrame) {
+        return false
+      }
+
+      const [id, callback] = nextFrame
+      queuedAnimationFrames.delete(id)
+      callback(window.performance.now())
+      return true
+    }
+    const liveSpriteCount = () => createdSprites.filter((sprite) => !sprite.destroyed).length
+    const flushUntilLiveSpriteCount = async (expectedCount: number) => {
+      for (let index = 0; index < 12 && liveSpriteCount() !== expectedCount; index += 1) {
+        await act(async () => {
+          expect(flushNextAnimationFrame()).toBe(true)
+          await Promise.resolve()
+        })
+      }
+
+      expect(liveSpriteCount()).toBe(expectedCount)
     }
     const overviewItemSet = createItems(
       PROJECT_CANVAS_WEBGL_OVERVIEW_SPRITE_RECONCILE_BATCH_SIZE * 2
@@ -4114,20 +4232,20 @@ describe('ProjectCanvasWebGLImageLayer', () => {
       const app = createdApplications[0]
       const renderCountAfterFirstBatch = app.render.mock.calls.length
 
-      act(flushAnimationFrames)
-
-      await waitFor(
-        () => {
-          expect(createdSprites.filter((sprite) => !sprite.destroyed)).toHaveLength(
-            overviewItemSet.length
-          )
-        },
-        { timeout: 15000 }
-      )
+      await flushUntilLiveSpriteCount(overviewItemSet.length)
 
       expect(app.render).toHaveBeenCalledTimes(renderCountAfterFirstBatch)
 
-      act(flushAnimationFrames)
+      for (
+        let index = 0;
+        index < 12 && app.render.mock.calls.length !== renderCountAfterFirstBatch + 1;
+        index += 1
+      ) {
+        await act(async () => {
+          expect(flushNextAnimationFrame()).toBe(true)
+          await Promise.resolve()
+        })
+      }
 
       expect(app.render).toHaveBeenCalledTimes(renderCountAfterFirstBatch + 1)
     } finally {
