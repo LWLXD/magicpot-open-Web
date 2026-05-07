@@ -6,6 +6,10 @@ import { normalizeFileMimeType } from '@renderer/utils/fileDisplay'
 import { isCanvasThumbnailSetFresh, pickBestCanvasThumbnailLevel } from './canvasThumbnailCache'
 import { ensureCanvasThumbnailSet, readWarmCanvasThumbnailSet } from './canvasThumbnailWorkerClient'
 import type { CanvasImageSourceIdentity, CanvasImageThumbnailSet } from './canvasThumbnailTypes'
+import {
+  createCanvasLocalImageObjectUrl,
+  readCanvasLocalImageBlobFromSource
+} from './canvasLocalImageSource'
 
 export const CANVAS_IMAGE_PROXY_MAX_SIDE = 2048
 export const CANVAS_IMAGE_PROXY_SMALL_BATCH_MAX_SIDE = 1024
@@ -500,13 +504,27 @@ async function createComfyImageObjectUrl(item: CanvasImageItem): Promise<string 
 async function loadHydratableCanvasImageSource(
   item: CanvasImageItem,
   loadImageFromSrcFn: (src: string) => Promise<LoadedCanvasImage>
-): Promise<{ src: string; loaded: LoadedCanvasImage } | null> {
+): Promise<{ src: string; loaded: LoadedCanvasImage; revokeSrc?: string } | null> {
   try {
     return {
       src: item.src,
       loaded: await loadImageFromSrcFn(item.src)
     }
   } catch {
+    const recoveredLocalSrc = await createCanvasLocalImageObjectUrl(item.src, item.fileName)
+    if (recoveredLocalSrc) {
+      try {
+        return {
+          src: item.src,
+          loaded: await loadImageFromSrcFn(recoveredLocalSrc),
+          revokeSrc: recoveredLocalSrc
+        }
+      } catch (error) {
+        URL.revokeObjectURL(recoveredLocalSrc)
+        console.warn('[Canvas] Failed to hydrate recovered local image source:', item.id, error)
+      }
+    }
+
     const recoveredSrc = await createComfyImageObjectUrl(item)
     if (!recoveredSrc || recoveredSrc === item.src) {
       return null
@@ -597,6 +615,11 @@ async function resolveCanvasImageThumbnailSourceBlob({
     return sourceFile
   }
 
+  const localBlob = await readCanvasLocalImageBlobFromSource(src)
+  if (localBlob) {
+    return localBlob
+  }
+
   if (typeof fetch !== 'function' || !canFetchCanvasImageThumbnailSource(src)) {
     return null
   }
@@ -665,6 +688,28 @@ export async function resolveCanvasImageThumbnailDisplayAsset({
       thumbnailSet: resolvedThumbnailSet
     }
   } catch (error) {
+    const recoveredThumbnailSrc = await createCanvasLocalImageObjectUrl(
+      thumbnailLevel.src,
+      thumbnailLevel.filename
+    )
+    if (recoveredThumbnailSrc) {
+      try {
+        const { img } = await loadImageFromSrcFn(recoveredThumbnailSrc)
+        return {
+          image: img,
+          thumbnailSet: resolvedThumbnailSet
+        }
+      } catch (recoveredError) {
+        console.warn(
+          '[Canvas] Failed to load recovered thumbnail preview image:',
+          thumbnailLevel.src,
+          recoveredError
+        )
+      } finally {
+        URL.revokeObjectURL(recoveredThumbnailSrc)
+      }
+    }
+
     console.warn('[Canvas] Failed to load thumbnail preview image:', thumbnailLevel.src, error)
     return null
   }
@@ -803,5 +848,9 @@ export async function hydrateCanvasImageItemForCanvas(
   } catch {
     console.warn('[Canvas] Failed to hydrate imported image, skipping:', item.id)
     return null
+  } finally {
+    if (resolvedSource.revokeSrc) {
+      URL.revokeObjectURL(resolvedSource.revokeSrc)
+    }
   }
 }
