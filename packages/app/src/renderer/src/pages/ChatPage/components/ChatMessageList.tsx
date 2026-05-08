@@ -129,8 +129,10 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
   return (
     <Box
       ref={chatContainerRef}
+      data-testid="chat-message-list"
       sx={{
         flex: 1,
+        minHeight: 0,
         overflow: 'auto',
         overflowX: 'hidden',
         display: 'flex',
@@ -644,7 +646,7 @@ const UserMessageEditForm: React.FC<{
           <Button
             variant="contained"
             size="small"
-            disabled={!editingContent.trim() || editingContent.trim() === message.content}
+            disabled={!editingContent.trim()}
             onClick={() => {
               const newContent = editingContent.trim()
               if (!newContent) return

@@ -67,17 +67,48 @@ jobs:
           npm run prepare:embedded
           npx cross-env PACKAGE_MODE=embedded npm run package:win -- --publish never
 
+      - name: Prepare release assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $assetsDir = 'dist/release-assets'
+          New-Item -ItemType Directory -Force -Path $assetsDir | Out-Null
+          Get-ChildItem -LiteralPath $assetsDir -Force | Remove-Item -Force
+
+          $archiveFiles = @(
+            Get-ChildItem -LiteralPath 'dist/embedded' -File |
+              Where-Object { $_.Name -like '*-win.7z' -or $_.Name -like '*-win.zip' }
+          )
+          if ($archiveFiles.Count -ne 1) {
+            throw "Expected exactly one Windows archive, found $($archiveFiles.Count)"
+          }
+
+          $archive = $archiveFiles[0]
+          [int64]$githubLimitBytes = [int64]2147483648
+
+          if ($archive.Length -ge $githubLimitBytes) {
+            throw "Windows archive exceeds GitHub's single-asset size limit: $($archive.Name) is $($archive.Length) bytes"
+          }
+
+          Copy-Item -LiteralPath $archive.FullName -Destination (Join-Path $assetsDir $archive.Name)
+
+          Get-ChildItem -LiteralPath $assetsDir | Select-Object Name,Length
+
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: release/${{ inputs.tag_name }}
+          target_commitish: ${{ inputs.ref }}
           name: ${{ inputs.release_name }}
           draft: false
           prerelease: false
           generate_release_notes: true
+          body: |
+            Windows embedded builds are distributed as single `.7z` archives.
           files: |
-            dist/embedded/*-win.zip
+            dist/release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
