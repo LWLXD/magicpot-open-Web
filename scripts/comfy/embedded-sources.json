@@ -3,7 +3,7 @@
     {
       "name": "ComfyUI",
       "url": "https://github.com/Comfy-Org/ComfyUI.git",
-      "commit": "52976f3ea33cc2312c7b5a32e1c7510b203eefb6",
+      "commit": "0155ddcbe32b29cdc3284ec3fbd39edc47d3925e",
       "relativePath": "vendor/comfyui/ComfyUI"
     },
     {
@@ -46,7 +46,7 @@
     {
       "name": "ComfyUI-Manager",
       "url": "https://github.com/Comfy-Org/ComfyUI-Manager.git",
-      "commit": "8079db221de4619c18b703369bc39e04af6f15b9",
+      "commit": "3b2f6fd149e582344f97f5536afa24f9a20bfb45",
       "relativePath": "vendor/comfyui/comfyui_data/custom_nodes/ComfyUI-Manager"
     },
     {
