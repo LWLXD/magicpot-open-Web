@@ -9,28 +9,53 @@
     },
     {
       "label": "UNet加载器",
-      "slot": "$.214.inputs.unet_name",
+      "slot": "$.37.inputs.unet_name",
       "component": "InputComfySelect"
     },
     {
       "label": "CLIP加载器",
-      "slot": "$.218.inputs.clip_name",
+      "slot": "$.41.inputs.clip_name",
       "component": "InputComfySelect"
     },
     {
       "label": "加载VAE",
-      "slot": "$.219.inputs.vae_name",
+      "slot": "$.42.inputs.vae_name",
       "component": "InputComfySelect"
     },
     {
       "label": "Anyline-Controlnet",
-      "slot": "$.215.inputs.control_net_name",
+      "slot": "$.38.inputs.control_net_name",
       "component": "InputComfySelect"
     },
     {
       "label": "Depth-Controlnet",
-      "slot": "$.216.inputs.control_net_name",
+      "slot": "$.39.inputs.control_net_name",
       "component": "InputComfySelect"
+    },
+    {
+      "label": "LoRA",
+      "component": "Section",
+      "defaultExpanded": false,
+      "gridStyle": "wide"
+    },
+    {
+      "label": "LoRA",
+      "component": "InputLoRAChain",
+      "outputModelSlots": [
+        "$.47.inputs.model"
+      ],
+      "outputClipSlots": [
+        "$.30.inputs.clip",
+        "$.31.inputs.clip"
+      ],
+      "inputModel": [
+        "40",
+        0
+      ],
+      "inputClip": [
+        "41",
+        0
+      ]
     },
     {
       "label": "生成参数",
@@ -40,7 +65,7 @@
     },
     {
       "label": "Controlnet",
-      "slot": "$.211.inputs.value",
+      "slot": "$.35.inputs.value",
       "min": 0,
       "max": 1,
       "step": 0.01,
@@ -48,7 +73,7 @@
     },
     {
       "label": "重绘幅度",
-      "slot": "$.212.inputs.value",
+      "slot": "$.34.inputs.value",
       "min": 0,
       "max": 1,
       "step": 0.01,
@@ -56,29 +81,24 @@
     },
     {
       "label": "加载图像",
-      "slot": "$.228.inputs.image",
+      "slot": "$.51.inputs.image",
       "component": "InputComfyImage"
     },
     {
       "label": "正面提示词",
-      "slot": "$.222.inputs.value",
+      "slot": "$.45.inputs.value",
       "component": "InputPrompt",
       "suffixPrompt": ""
     },
     {
       "label": "负面提示词",
-      "slot": "$.223.inputs.value",
+      "slot": "$.46.inputs.value",
       "component": "InputPrompt",
       "suffixPrompt": ""
     },
     {
-      "label": "加载LoRA",
-      "slot": "$.227.inputs.lora_name",
-      "component": "InputComfySelect"
-    },
-    {
       "label": "随机种",
-      "slot": "$.209.inputs.value",
+      "slot": "$.32.inputs.value",
       "component": "InputSeed"
     }
   ],
@@ -90,7 +110,7 @@
     "https://github.com/kijai/ComfyUI-KJNodes"
   ],
   "outputNodeIds": [
-    "225"
+    "48"
   ],
   "isHidden": false,
   "requiredModels": [
@@ -129,12 +149,6 @@
       "size": "0.2 GB",
       "dir": "models/vae",
       "url": "https://modelscope.cn/models/Comfy-Org/Qwen-Image_ComfyUI/resolve/master/split_files/vae/qwen_image_vae.safetensors"
-    },
-    {
-      "name": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
-      "size": "1.5 GB",
-      "dir": "models/loras",
-      "url": "https://modelscope.cn/models/lightx2v/Qwen-Image-Edit-2511-Lightning/resolve/master/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors"
     }
   ]
 }

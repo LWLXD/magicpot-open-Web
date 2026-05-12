@@ -16,53 +16,6 @@
       "title": "AIO Aux Preprocessor"
     }
   },
-  "51": {
-    "inputs": {
-      "preprocessor": "DepthAnythingV2Preprocessor",
-      "resolution": [
-        "59",
-        0
-      ],
-      "image": [
-        "71",
-        0
-      ]
-    },
-    "class_type": "AIO_Preprocessor",
-    "_meta": {
-      "title": "AIO Aux Preprocessor"
-    }
-  },
-  "52": {
-    "inputs": {
-      "resize_mode": "Just Resize",
-      "image": [
-        "71",
-        0
-      ]
-    },
-    "class_type": "easy imagePixelPerfect",
-    "_meta": {
-      "title": "图像完美像素"
-    }
-  },
-  "53": {
-    "inputs": {
-      "preprocessor": "AnyLineArtPreprocessor_aux",
-      "resolution": [
-        "52",
-        0
-      ],
-      "image": [
-        "71",
-        0
-      ]
-    },
-    "class_type": "AIO_Preprocessor",
-    "_meta": {
-      "title": "AIO Aux Preprocessor"
-    }
-  },
   "58": {
     "inputs": {
       "control_net_name": "FLUX.1-dev-ControlNet-Union-Pro-2.0.safetensors"
@@ -70,19 +23,6 @@
     "class_type": "ControlNetLoader",
     "_meta": {
       "title": "加载ControlNet模型"
-    }
-  },
-  "59": {
-    "inputs": {
-      "resize_mode": "Just Resize",
-      "image": [
-        "71",
-        0
-      ]
-    },
-    "class_type": "easy imagePixelPerfect",
-    "_meta": {
-      "title": "图像完美像素"
     }
   },
   "61": {
@@ -151,40 +91,6 @@
     "class_type": "CLIPTextEncode",
     "_meta": {
       "title": "CLIP文本编码"
-    }
-  },
-  "68": {
-    "inputs": {
-      "strength": 0.3,
-      "start_percent": 0,
-      "end_percent": [
-        "95",
-        0
-      ],
-      "positive": [
-        "84",
-        0
-      ],
-      "negative": [
-        "65",
-        0
-      ],
-      "control_net": [
-        "58",
-        0
-      ],
-      "vae": [
-        "75",
-        0
-      ],
-      "image": [
-        "51",
-        0
-      ]
-    },
-    "class_type": "ControlNetApplySD3",
-    "_meta": {
-      "title": "应用ControlNet"
     }
   },
   "69": {
@@ -425,7 +331,7 @@
   },
   "91": {
     "inputs": {
-      "image": "1 (1).png"
+      "image": ""
     },
     "class_type": "LoadImage",
     "_meta": {
@@ -434,7 +340,7 @@
   },
   "92": {
     "inputs": {
-      "lora_name": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+      "lora_name": "",
       "strength_model": 0.8000000000000002,
       "strength_clip": 0.8000000000000002,
       "model": [
@@ -477,40 +383,6 @@
       ],
       "image": [
         "50",
-        0
-      ]
-    },
-    "class_type": "ControlNetApplySD3",
-    "_meta": {
-      "title": "应用ControlNet"
-    }
-  },
-  "94": {
-    "inputs": {
-      "strength": 1,
-      "start_percent": 0,
-      "end_percent": [
-        "95",
-        0
-      ],
-      "positive": [
-        "68",
-        0
-      ],
-      "negative": [
-        "68",
-        1
-      ],
-      "control_net": [
-        "73",
-        0
-      ],
-      "vae": [
-        "75",
-        0
-      ],
-      "image": [
-        "53",
         0
       ]
     },

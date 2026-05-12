@@ -9,18 +9,43 @@
     },
     {
       "label": "UNet加载器",
-      "slot": "$.324.inputs.unet_name",
+      "slot": "$.240.inputs.unet_name",
       "component": "InputComfySelect"
     },
     {
       "label": "CLIP加载器",
-      "slot": "$.319.inputs.clip_name",
+      "slot": "$.235.inputs.clip_name",
       "component": "InputComfySelect"
     },
     {
       "label": "加载VAE",
-      "slot": "$.323.inputs.vae_name",
+      "slot": "$.239.inputs.vae_name",
       "component": "InputComfySelect"
+    },
+    {
+      "label": "LoRA",
+      "component": "Section",
+      "defaultExpanded": false,
+      "gridStyle": "wide"
+    },
+    {
+      "label": "LoRA",
+      "component": "InputLoRAChain",
+      "outputModelSlots": [
+        "$.241.inputs.model"
+      ],
+      "outputClipSlots": [
+        "$.225.inputs.clip",
+        "$.226.inputs.clip"
+      ],
+      "inputModel": [
+        "236",
+        0
+      ],
+      "inputClip": [
+        "235",
+        0
+      ]
     },
     {
       "label": "生成参数",
@@ -32,29 +57,24 @@
       "label": "图片尺寸",
       "component": "InputImageSize",
       "seperateSlots": true,
-      "widthSlot": "$.311.inputs.value",
-      "heightSlot": "$.312.inputs.value"
+      "widthSlot": "$.227.inputs.value",
+      "heightSlot": "$.228.inputs.value"
     },
     {
       "label": "正面提示词",
-      "slot": "$.327.inputs.value",
+      "slot": "$.243.inputs.value",
       "component": "InputPrompt",
       "suffixPrompt": ""
     },
     {
       "label": "负面提示词",
-      "slot": "$.321.inputs.value",
+      "slot": "$.237.inputs.value",
       "component": "InputPrompt",
       "suffixPrompt": ""
     },
     {
-      "label": "加载LoRA",
-      "slot": "$.330.inputs.lora_name",
-      "component": "InputComfySelect"
-    },
-    {
       "label": "随机种",
-      "slot": "$.314.inputs.value",
+      "slot": "$.230.inputs.value",
       "component": "InputSeed"
     }
   ],
@@ -66,7 +86,7 @@
     "https://github.com/Fannovel16/comfyui_controlnet_aux"
   ],
   "outputNodeIds": [
-    "328"
+    "244"
   ],
   "requiredModels": [
     {
@@ -86,12 +106,6 @@
       "size": "19 GB",
       "dir": "models/unet",
       "url": "https://modelscope.cn/models/Comfy-Org/Qwen-Image_ComfyUI/resolve/master/split_files/diffusion_models/qwen_image_fp8_e4m3fn.safetensors"
-    },
-    {
-      "name": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
-      "size": "1.5 GB",
-      "dir": "models/loras",
-      "url": "https://modelscope.cn/models/lightx2v/Qwen-Image-Edit-2511-Lightning/resolve/master/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors"
     }
   ]
 }

@@ -3,6 +3,7 @@
  */
 
 import path from 'path'
+import type { Dirent } from 'fs'
 import { getBuildEnv } from '../config/buildEnv'
 import { getConfig } from '../config/config'
 import { ConfigUtils } from '@shared/config/configUtils'
@@ -79,6 +80,31 @@ export class QAppFSCli {
   private async getBuiltinQAppDir(): Promise<string> {
     const dir = this.configUtils.getBuiltinQAppDir()
     return this.ensureDir(dir)
+  }
+
+  private async getDirectoryDirents(currentDir: string, dirents: Dirent[]): Promise<Dirent[]> {
+    const directories: Dirent[] = []
+
+    for (const dirent of dirents) {
+      if (dirent.isDirectory()) {
+        directories.push(dirent)
+        continue
+      }
+
+      if (!dirent.isSymbolicLink()) {
+        continue
+      }
+
+      const isDirectory = await fs
+        .stat(path.join(currentDir, dirent.name))
+        .then((stat) => stat.isDirectory())
+        .catch(() => false)
+      if (isDirectory) {
+        directories.push(dirent)
+      }
+    }
+
+    return directories
   }
 
   private getQAppPaths(
@@ -200,7 +226,7 @@ export class QAppFSCli {
       }
     }
 
-    for (const dirent of dirents.filter((d) => d.isDirectory())) {
+    for (const dirent of await this.getDirectoryDirents(currentDir, dirents)) {
       const subRelative = relativeDir ? path.join(relativeDir, dirent.name) : dirent.name
       await this.migrateLegacyQApps(baseDir, subRelative)
     }
@@ -279,7 +305,7 @@ export class QAppFSCli {
     }
 
     // A category only contains sub-QApps
-    for (const dirent of dirents.filter((d) => d.isDirectory())) {
+    for (const dirent of await this.getDirectoryDirents(currentDir, dirents)) {
       const subRelative = relativeDir ? path.join(relativeDir, dirent.name) : dirent.name
       const children = await this.buildTree(baseDir, isBuiltin, subRelative)
 
@@ -305,11 +331,42 @@ export class QAppFSCli {
     for (const source of sources) {
       const tree = await this.buildTree(source.dir, source.isBuiltin)
       for (const item of tree) {
-        merged.set(item.key, item)
+        const existing = merged.get(item.key)
+        merged.set(item.key, existing ? this.mergeQAppMenuItem(existing, item) : item)
       }
     }
 
     return Array.from(merged.values())
+  }
+
+  private mergeQAppMenuItems(
+    baseItems: QAppMenuItem[] = [],
+    overrideItems: QAppMenuItem[] = []
+  ): QAppMenuItem[] {
+    const merged = new Map<string, QAppMenuItem>()
+
+    for (const item of baseItems) {
+      merged.set(item.key, item)
+    }
+
+    for (const item of overrideItems) {
+      const existing = merged.get(item.key)
+      merged.set(item.key, existing ? this.mergeQAppMenuItem(existing, item) : item)
+    }
+
+    return Array.from(merged.values())
+  }
+
+  private mergeQAppMenuItem(baseItem: QAppMenuItem, overrideItem: QAppMenuItem): QAppMenuItem {
+    if (baseItem.isDirectory && overrideItem.isDirectory) {
+      return {
+        ...baseItem,
+        ...overrideItem,
+        children: this.mergeQAppMenuItems(baseItem.children, overrideItem.children)
+      }
+    }
+
+    return overrideItem
   }
 
   async getQApp(key: string): Promise<QAppBundleData> {
