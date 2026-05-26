@@ -11,6 +11,7 @@ import { flushSync } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import type { CanvasFigmaBinding } from '@shared/figma'
 import { api } from '../../utils/windowUtils'
+import { isMagicPotWebRuntime, triggerBrowserDownload } from '../../utils/webRuntime'
 import { exportCanvasFile, exportCanvasFileAsStandalone } from './canvasStorage'
 import {
   getExportFileExtension,
@@ -690,6 +691,12 @@ export function useCanvasExportWorkflow({
 
   const chooseExportPath = useCallback(
     async (defaultName: string, format: ExportImageFormat) => {
+      if (isMagicPotWebRuntime()) {
+        return defaultName.endsWith(getExportFileExtension(format))
+          ? defaultName
+          : `${defaultName}${getExportFileExtension(format)}`
+      }
+
       const res = await api().svcDialog.showSaveDialog({
         title: t('canvas.export_scene_dialog_title'),
         defaultPath: defaultName,
@@ -713,6 +720,11 @@ export function useCanvasExportWorkflow({
       const blob = await renderCanvasBlob(canvas, format)
       const buffer = new Uint8Array(await blob.arrayBuffer())
 
+      if (isMagicPotWebRuntime()) {
+        triggerBrowserDownload(buffer, window.path.basename(targetPath), getExportMimeType(format))
+        return
+      }
+
       await api().svcFs.saveImageToPath({
         image: buffer,
         outputPath: window.path.dirname(targetPath),
@@ -732,6 +744,11 @@ export function useCanvasExportWorkflow({
       const blob = await renderCanvasBlob(canvas, format)
       const buffer = new Uint8Array(await blob.arrayBuffer())
 
+      if (isMagicPotWebRuntime()) {
+        triggerBrowserDownload(buffer, fileName, getExportMimeType(format))
+        return
+      }
+
       await api().svcHyper.saveImageToDir({
         data: buffer,
         fileName,
@@ -744,6 +761,11 @@ export function useCanvasExportWorkflow({
   const saveSvgToPath = useCallback(async (svgMarkup: string, targetPath: string) => {
     const buffer = new TextEncoder().encode(svgMarkup)
 
+    if (isMagicPotWebRuntime()) {
+      triggerBrowserDownload(buffer, window.path.basename(targetPath), SVG_EXPORT_MIME_TYPE)
+      return
+    }
+
     await api().svcFs.saveImageToPath({
       image: buffer,
       outputPath: window.path.dirname(targetPath),
@@ -754,6 +776,11 @@ export function useCanvasExportWorkflow({
   const saveSvgToDirectory = useCallback(
     async (svgMarkup: string, dir: string, fileName: string) => {
       const buffer = new TextEncoder().encode(svgMarkup)
+
+      if (isMagicPotWebRuntime()) {
+        triggerBrowserDownload(buffer, fileName, SVG_EXPORT_MIME_TYPE)
+        return
+      }
 
       await api().svcHyper.saveImageToDir({
         data: buffer,
@@ -1556,13 +1583,15 @@ export function useCanvasExportWorkflow({
         return
       }
 
-      const result = await api().svcDialog.showOpenDialog({
-        title: t('canvas.export_images_select_dir'),
-        properties: ['openDirectory']
-      })
-      if (result.canceled || !result.filePaths?.length) return
-
-      const outputDir = result.filePaths[0]
+      let outputDir = ''
+      if (!isMagicPotWebRuntime()) {
+        const result = await api().svcDialog.showOpenDialog({
+          title: t('canvas.export_images_select_dir'),
+          properties: ['openDirectory']
+        })
+        if (result.canceled || !result.filePaths?.length) return
+        outputDir = result.filePaths[0]
+      }
       const selectionSnapshot = await prepareExportRender()
 
       try {
@@ -1601,13 +1630,15 @@ export function useCanvasExportWorkflow({
         return
       }
 
-      const result = await api().svcDialog.showOpenDialog({
-        title: t('canvas.export_images_select_dir'),
-        properties: ['openDirectory']
-      })
-      if (result.canceled || !result.filePaths?.length) return
-
-      const outputDir = result.filePaths[0]
+      let outputDir = ''
+      if (!isMagicPotWebRuntime()) {
+        const result = await api().svcDialog.showOpenDialog({
+          title: t('canvas.export_images_select_dir'),
+          properties: ['openDirectory']
+        })
+        if (result.canceled || !result.filePaths?.length) return
+        outputDir = result.filePaths[0]
+      }
 
       try {
         for (const [index, item] of targetItems.entries()) {

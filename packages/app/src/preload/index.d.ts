@@ -8,7 +8,28 @@ export type ElectronFileBridge = {
 }
 
 declare global {
+  type MagicPotWebUserRole = 'admin' | 'user'
+  type MagicPotWebUserPermissions = {
+    canAccessSettings: boolean
+    canAccessWorkshop: boolean
+    canManageUsers: boolean
+  }
+  type MagicPotWebUser = {
+    id: string
+    email: string
+    username: string
+    role: MagicPotWebUserRole
+    permissions: MagicPotWebUserPermissions
+    createdAt: string
+    lastLoginAt?: string
+    disabled?: boolean
+  }
+
   interface Window {
+    __MAGICPOT_WEB_RUNTIME__?: boolean
+    __MAGICPOT_WEB__?: {
+      user?: MagicPotWebUser
+    }
     electron: ElectronAPI
     electronFile?: ElectronFileBridge
     api: Api

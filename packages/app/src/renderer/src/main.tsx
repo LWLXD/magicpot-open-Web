@@ -1,6 +1,8 @@
 // packages/app/src/renderer/packages/app/src/main.tsx
 import './utils/loggingOverride' // override console.log before anything else
+import './utils/webBrowserPrerequisites'
 import { installPerformanceMeasureGuard } from './utils/performanceMeasureGuard'
+import './utils/webRuntimeBridge'
 import './assets/main.css'
 import './i18n'
 import { Fragment, StrictMode } from 'react'

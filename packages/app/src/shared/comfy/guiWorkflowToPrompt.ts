@@ -1,4 +1,5 @@
 import { ObjectInfo, ObjectInfoMap, Workflow, WorkflowInputValue, WorkflowNode } from './types'
+import { isComfyUIBuiltinNode } from './funcs'
 
 export type GuiNode = {
   id: number
@@ -110,13 +111,55 @@ export function convertGuiWorkflowToPrompt(
     return null
   }
 
-  const linkMap = new Map<number, { fromNodeId: string; fromSlot: number }>()
-  for (const link of gui.links ?? []) {
-    const [linkId, fromNodeId, fromSlot] = link
-    linkMap.set(linkId, {
+  const nodesById = new Map((gui.nodes ?? []).map((node) => [String(node.id), node]))
+  const linksById = new Map((gui.links ?? []).map((link) => [link[0], link]))
+
+  const resolveLinkSource = (
+    linkId: number,
+    seen = new Set<number>()
+  ): { fromNodeId: string; fromSlot: number } | null => {
+    if (seen.has(linkId)) {
+      return null
+    }
+    seen.add(linkId)
+
+    const link = linksById.get(linkId)
+    if (!link) {
+      return null
+    }
+
+    const [, fromNodeId, fromSlot] = link
+    const sourceNode = nodesById.get(String(fromNodeId))
+    if (!sourceNode) {
+      return {
+        fromNodeId: String(fromNodeId),
+        fromSlot
+      }
+    }
+
+    const sourceClassType = getNodeClassType(sourceNode)
+    if (sourceClassType === 'Reroute') {
+      const inputLink = sourceNode.inputs?.find((input) => input.link != null)?.link
+      return inputLink == null ? null : resolveLinkSource(inputLink, seen)
+    }
+
+    if (isComfyUIBuiltinNode(sourceClassType)) {
+      return null
+    }
+
+    return {
       fromNodeId: String(fromNodeId),
       fromSlot
-    })
+    }
+  }
+
+  const linkMap = new Map<number, { fromNodeId: string; fromSlot: number }>()
+  for (const link of gui.links ?? []) {
+    const [linkId] = link
+    const resolved = resolveLinkSource(linkId)
+    if (resolved) {
+      linkMap.set(linkId, resolved)
+    }
   }
 
   const workflow: Workflow = {}
@@ -124,6 +167,10 @@ export function convertGuiWorkflowToPrompt(
   for (const node of gui.nodes ?? []) {
     const nodeId = String(node.id)
     const classType = getNodeClassType(node)
+
+    if (isComfyUIBuiltinNode(classType)) {
+      continue
+    }
 
     const wfNode: WorkflowNode = {
       class_type: classType,

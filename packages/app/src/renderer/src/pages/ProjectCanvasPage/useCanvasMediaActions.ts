@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../utils/windowUtils'
+import { isMagicPotWebRuntime, writeImageBytesToBrowserClipboard } from '../../utils/webRuntime'
 import { sanitizeFilePart, sanitizeRelativePathSegments } from './canvasExportNamingUtils'
 import type { CanvasItem, CanvasModel3DItem, CanvasVideoItem } from './types'
 
@@ -30,6 +31,33 @@ const getImageDownloadExtension = (format: DownloadImageFormat): string => {
   if (format === 'jpeg') return '.jpeg'
   if (format === 'svg') return '.svg'
   return '.png'
+}
+
+const getRenderedImageMimeType = (format: RenderedImageFormat): string => {
+  if (format === 'jpeg') return 'image/jpeg'
+  if (format === 'svg') return 'image/svg+xml'
+  return 'image/png'
+}
+
+const triggerBrowserDownload = (bytes: Uint8Array, fileName: string, mimeType: string): void => {
+  const blob = new Blob([bytes as BlobPart], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fileName
+  anchor.rel = 'noopener'
+  anchor.style.display = 'none'
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+const writeImageToBrowserClipboard = async (
+  bytes: Uint8Array,
+  mimeType = 'image/png'
+): Promise<void> => {
+  await writeImageBytesToBrowserClipboard(bytes, mimeType)
 }
 
 const inferImageDownloadFormat = (filePath: string): DownloadImageFormat => {
@@ -74,6 +102,22 @@ async function fetchBinaryAsset(url: string, label: string): Promise<Uint8Array>
   const blob = await response.blob()
   const arrayBuffer = await blob.arrayBuffer()
   return new Uint8Array(arrayBuffer)
+}
+
+function getBlobItemMimeType(item: CanvasModel3DItem | CanvasVideoItem): string {
+  if (item.type === 'video') {
+    const extension = window.path.extname(item.fileName).toLowerCase()
+    if (extension === '.webm') return 'video/webm'
+    if (extension === '.mov') return 'video/quicktime'
+    if (extension === '.avi') return 'video/x-msvideo'
+    return 'video/mp4'
+  }
+
+  const extension = window.path.extname(item.fileName).toLowerCase()
+  if (extension === '.glb') return 'model/gltf-binary'
+  if (extension === '.gltf') return 'model/gltf+json'
+  if (extension === '.obj') return 'model/obj'
+  return 'application/octet-stream'
 }
 
 export function useCanvasMediaActions({
@@ -155,6 +199,23 @@ export function useCanvasMediaActions({
 
       try {
         const data = await renderCanvasItemsImageBytes(targetItems, 'png', false)
+        if (isMagicPotWebRuntime()) {
+          try {
+            await writeImageToBrowserClipboard(data, 'image/png')
+            notifySuccess(t('chat.image_copied'))
+            return
+          } catch (clipboardError) {
+            console.warn(
+              '[Canvas] Browser clipboard write failed, falling back to download:',
+              clipboardError
+            )
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+            triggerBrowserDownload(data, `canvas-copy-${timestamp}.png`, 'image/png')
+            notifyError('浏览器限制了图片复制，已改为下载图片')
+            return
+          }
+        }
+
         const result = await api().svcHyper.writeImageToClipboard({ data })
 
         if (!result.success) {
@@ -177,6 +238,14 @@ export function useCanvasMediaActions({
       try {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
         const defaultBaseName = `${sanitizeFilePart(prefix)}-${timestamp}`
+        if (isMagicPotWebRuntime()) {
+          const bytes = await renderCanvasItemsImageBytes(targetItems, 'png', false)
+          const fileName = `${defaultBaseName}.png`
+          triggerBrowserDownload(bytes, fileName, getRenderedImageMimeType('png'))
+          notifySuccess(`Saved ${fileName}`)
+          return
+        }
+
         const target = await chooseImageDownloadTarget(defaultBaseName)
         if (!target) return
 
@@ -211,6 +280,29 @@ export function useCanvasMediaActions({
           item.src,
           item.type === 'model3d' ? 'Model file' : 'Video file'
         )
+
+        if (isMagicPotWebRuntime()) {
+          const sanitizedFileName = sanitizeFilePart(item.fileName)
+          triggerBrowserDownload(data, sanitizedFileName, getBlobItemMimeType(item))
+
+          if (item.type === 'model3d') {
+            for (const [textureName, textureUrl] of Object.entries(item.textures || {})) {
+              try {
+                const textureData = await fetchBinaryAsset(textureUrl, `Texture "${textureName}"`)
+                triggerBrowserDownload(
+                  textureData,
+                  sanitizeRelativePathSegments(textureName).join('-') || 'texture.bin',
+                  'application/octet-stream'
+                )
+              } catch (error) {
+                console.warn(`[download] skipped texture ${textureName}:`, error)
+              }
+            }
+          }
+
+          notifySuccess(`Saved ${sanitizedFileName}`)
+          return
+        }
 
         if (item.type === 'model3d') {
           const textureEntries = Object.entries(item.textures || {})

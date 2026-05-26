@@ -322,6 +322,14 @@ export type ProjectTraceConfig = {
   enable_agent_terminal: boolean
 }
 
+export type WebServerConfig = {
+  enable_server: boolean
+  host: string
+  port: number
+  allow_registration: boolean
+  session_ttl_hours: number
+}
+
 type ConfigShape = {
   config_version: '>1.0.53'
   client_id: string
@@ -375,6 +383,7 @@ type ConfigShape = {
 
   chat_config: ChatConfig
   project_trace_config: ProjectTraceConfig
+  web_server_config: WebServerConfig
 
   remote_llm_server_config: {
     server_origin: string
@@ -525,6 +534,13 @@ export const DEFAULT_CONFIG: Config = {
   project_trace_config: {
     enable_agent_reranker: false,
     enable_agent_terminal: false
+  },
+  web_server_config: {
+    enable_server: true,
+    host: '0.0.0.0',
+    port: 3218,
+    allow_registration: true,
+    session_ttl_hours: 168
   },
   remote_llm_server_config: {
     server_origin: 'http://127.0.0.1:3721',

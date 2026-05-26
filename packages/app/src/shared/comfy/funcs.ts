@@ -150,6 +150,10 @@ export function parseAllNodeIdAndField(workflow: Workflow): { nodeId: string; fi
  */
 const COMFYUI_BUILTIN_NODES = new Set(['Note', 'Reroute'])
 
+export function isComfyUIBuiltinNode(classType: string): boolean {
+  return COMFYUI_BUILTIN_NODES.has(classType)
+}
+
 /**
  * Find the not installed node class type in the workflow
  * @param workflow the workflow
@@ -165,6 +169,6 @@ export function findNotInstalledNodeInfo(workflow: Workflow, objectInfos: Object
   const uniqueNodeClsList = Array.from(new Set(nodeClsList))
   const installedNodeClsSet = new Set(Object.keys(objectInfos))
   return uniqueNodeClsList.filter(
-    (cls) => !installedNodeClsSet.has(cls) && !COMFYUI_BUILTIN_NODES.has(cls)
+    (cls) => !installedNodeClsSet.has(cls) && !isComfyUIBuiltinNode(cls)
   )
 }

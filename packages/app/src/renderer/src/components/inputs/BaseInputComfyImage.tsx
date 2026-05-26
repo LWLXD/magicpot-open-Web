@@ -13,6 +13,7 @@ import {
   activateQuickAppImagePasteTarget,
   deactivateQuickAppImagePasteTarget
 } from '@renderer/utils/quickAppPasteTarget'
+import { getMagicPotWebImageClipboardFile, isMagicPotWebRuntime } from '@renderer/utils/webRuntime'
 
 type BaseInputComfyImageProps = {
   label: string
@@ -64,6 +65,13 @@ const BaseInputComfyImage: React.FC<BaseInputComfyImageProps> = ({
   const isPasteTargetActive = isHovered || isKeyboardFocused
 
   const readNavigatorClipboardImage = React.useCallback(async (): Promise<File | null> => {
+    if (isMagicPotWebRuntime()) {
+      const magicPotClipboardFile = getMagicPotWebImageClipboardFile()
+      if (magicPotClipboardFile) {
+        return magicPotClipboardFile
+      }
+    }
+
     try {
       if (typeof navigator === 'undefined' || !navigator.clipboard) {
         return null
@@ -186,6 +194,16 @@ const BaseInputComfyImage: React.FC<BaseInputComfyImageProps> = ({
     (event: KeyboardEvent) => {
       if (!isPasteTargetActive || !isPasteShortcut(event)) {
         return
+      }
+
+      if (isMagicPotWebRuntime()) {
+        const magicPotClipboardFile = getMagicPotWebImageClipboardFile()
+        if (magicPotClipboardFile) {
+          event.preventDefault()
+          event.stopImmediatePropagation()
+          void doUpload(magicPotClipboardFile)
+          return
+        }
       }
 
       if (typeof navigator === 'undefined' || !navigator.clipboard) {

@@ -8,7 +8,9 @@ import {
   FlashOn as FlashIcon,
   Architecture as ArchitectureIcon,
   Chat as ChatIcon,
-  Dvr as ComfyIcon
+  Dvr as ComfyIcon,
+  ManageAccounts as ManageAccountsIcon,
+  AccountCircle as AccountCircleIcon
 } from '@mui/icons-material'
 import MainPage from './pages/MainPage/MainPage'
 import LegacyProjectWebglRedirectPage from './pages/ProjectCanvasPage/LegacyProjectWebglRedirectPage'
@@ -32,6 +34,8 @@ const CustomSkillManagerPage = lazyWithRetry(
 )
 const ChatPage = lazyWithRetry(() => import('./pages/ChatPage/ChatPage'))
 const AppLogPage = lazyWithRetry(() => import('./pages/AppLogPage'))
+const WebAdminPage = lazyWithRetry(() => import('./pages/WebAdminPage/WebAdminPage'))
+const WebAccountPage = lazyWithRetry(() => import('./pages/WebAccountPage/WebAccountPage'))
 
 export type PageType =
   | 'main'
@@ -49,6 +53,8 @@ export type PageType =
   | 'project_webgl_legacy'
   | 'chat'
   | 'language'
+  | 'web_admin'
+  | 'web_account'
 
 export interface RouteConfig {
   id: PageType
@@ -62,6 +68,7 @@ export interface RouteConfig {
   onlyWhenPythonCmdAvailable?: boolean
   onlyWhenComfyUICommandAvailable?: boolean
   hideWhenRemoteLLM?: boolean
+  webAdminOnly?: boolean
 }
 
 export const routes: RouteConfig[] = [
@@ -100,7 +107,8 @@ export const routes: RouteConfig[] = [
     labelKey: 'menu.custom_workshop',
     Icon: ArchitectureIcon,
     Page: QAppWorkshopPage,
-    showInSidebar: false
+    showInSidebar: false,
+    webAdminOnly: true
   },
   {
     id: 'qappdesign',
@@ -109,7 +117,8 @@ export const routes: RouteConfig[] = [
     labelKey: 'menu.custom_app',
     Icon: ArchitectureIcon,
     Page: QAppDesignPage,
-    showInSidebar: false
+    showInSidebar: false,
+    webAdminOnly: true
   },
   {
     id: 'target_manager',
@@ -118,7 +127,8 @@ export const routes: RouteConfig[] = [
     labelKey: 'custom_workshop.target',
     Icon: ArchitectureIcon,
     Page: TargetManagerPage,
-    showInSidebar: false
+    showInSidebar: false,
+    webAdminOnly: true
   },
   {
     id: 'custom_skill_manager',
@@ -127,7 +137,8 @@ export const routes: RouteConfig[] = [
     labelKey: 'custom_workshop.custom_skill',
     Icon: ArchitectureIcon,
     Page: CustomSkillManagerPage,
-    showInSidebar: false
+    showInSidebar: false,
+    webAdminOnly: true
   },
   {
     id: 'project_canvas',
@@ -162,7 +173,25 @@ export const routes: RouteConfig[] = [
     labelKey: 'menu.settings',
     Icon: SettingsIcon,
     Page: SettingsPage,
-    showInSidebar: true
+    showInSidebar: true,
+    webAdminOnly: true
+  },
+  {
+    id: 'web_admin',
+    path: '/web-admin',
+    label: 'Admin',
+    Icon: ManageAccountsIcon,
+    Page: WebAdminPage,
+    showInSidebar: false,
+    webAdminOnly: true
+  },
+  {
+    id: 'web_account',
+    path: '/account',
+    label: 'Account',
+    Icon: AccountCircleIcon,
+    Page: WebAccountPage,
+    showInSidebar: false
   },
   {
     id: 'terminal',

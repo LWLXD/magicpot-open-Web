@@ -8,6 +8,7 @@ import { LightingPanel } from './components/ImageEditPanel/LightingPanel'
 import { MultiAnglePanel } from './components/ImageEditPanel/MultiAnglePanel'
 import { ViewplanePanel } from './components/ImageEditPanel/ViewplanePanel'
 import { api } from '@renderer/utils/windowUtils'
+import { isMagicPotWebRuntime, triggerBrowserDownload } from '@renderer/utils/webRuntime'
 import { useMessage } from '@renderer/hooks/useMessage'
 import WebGLImageBoard from './WebGLImageBoard'
 
@@ -27,6 +28,19 @@ export default function ImageViewer({ imageUrl, onDelete }: ImageViewerProps) {
 
   const handleDownloadImage = async () => {
     try {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      const fileName = `${t('quickapp.results.generated_image') || 'image'}_${timestamp}.png`
+
+      if (isMagicPotWebRuntime()) {
+        const response = await fetch(imageUrl)
+        const blob = await response.blob()
+        const arrayBuffer = await blob.arrayBuffer()
+        const data = new Uint8Array(arrayBuffer)
+        triggerBrowserDownload(data, fileName, blob.type || 'image/png')
+        notifySuccess(t('quickapp.results.download_success') || 'Image downloaded successfully')
+        return
+      }
+
       const DOWNLOAD_DIR_KEY = 'qapp.downloadDir'
       let downloadDir = localStorage.getItem(DOWNLOAD_DIR_KEY)
 
@@ -41,12 +55,11 @@ export default function ImageViewer({ imageUrl, onDelete }: ImageViewerProps) {
         api().svcState.saveConfig({ config: { download_dir: downloadDir } })
       }
 
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-      const fileName = `${t('quickapp.results.generated_image') || 'image'}_${timestamp}.png`
       const response = await fetch(imageUrl)
       const blob = await response.blob()
       const arrayBuffer = await blob.arrayBuffer()
       const data = new Uint8Array(arrayBuffer)
+
       await api().svcHyper.saveImageToDir({ data, fileName, dir: downloadDir })
       notifySuccess(t('quickapp.results.download_success') || 'Image downloaded successfully')
     } catch (error) {

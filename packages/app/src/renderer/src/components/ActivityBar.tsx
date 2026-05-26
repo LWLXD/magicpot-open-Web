@@ -8,7 +8,9 @@ import {
   Terminal as TerminalIcon,
   Settings as SettingsIcon,
   FolderOpen as ProjectIcon,
-  Extension as ModelIcon
+  Extension as ModelIcon,
+  ManageAccounts as ManageAccountsIcon,
+  AccountCircle as AccountCircleIcon
 } from '@mui/icons-material'
 import { useAppDispatch, useAppSelector } from '../store'
 import {
@@ -24,6 +26,7 @@ import {
 } from '../store/slices/layoutSlice'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { isProjectCanvasRoutePath } from '../pages/ProjectCanvasPage/projectCanvasRouting'
+import { isMagicPotWebAdmin, isMagicPotWebRuntime } from '../utils/webRuntime'
 const ACTIVITY_BAR_WIDTH = 48
 const ACTIVITY_BAR_ICON_SIZE = 24
 const DARK_INACTIVE_ICON_COLOR = '#808694'
@@ -47,6 +50,9 @@ const ActivityBar: React.FC = () => {
   const effectSidePanel = isProjectCanvasActive ? activeSidePanel : null
   const effectRightPanelVisible = isProjectCanvasActive ? rightPanelVisible : false
   const projectEntryActive = activeTabId === 'tab-home' || Boolean(isProjectTab)
+  const webRuntime = isMagicPotWebRuntime()
+  const webAdmin = isMagicPotWebAdmin()
+  const showAdminOnlyItems = !webRuntime || webAdmin
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const iconSx = (active: boolean) => (theme: any) => ({
     width: ACTIVITY_BAR_WIDTH,
@@ -200,14 +206,16 @@ const ActivityBar: React.FC = () => {
           </>
         )}
 
-        <Tooltip title={t('menu.custom_workshop')} placement="right" arrow>
-          <Box
-            onClick={() => toggleTab('tab-design', t('menu.custom_workshop'), '/qappdesign')}
-            sx={iconSx(activeTabId === 'tab-design')}
-          >
-            <DesignIcon sx={iconGraphicSx} />
-          </Box>
-        </Tooltip>
+        {showAdminOnlyItems && (
+          <Tooltip title={t('menu.custom_workshop')} placement="right" arrow>
+            <Box
+              onClick={() => toggleTab('tab-design', t('menu.custom_workshop'), '/qappdesign')}
+              sx={iconSx(activeTabId === 'tab-design')}
+            >
+              <DesignIcon sx={iconGraphicSx} />
+            </Box>
+          </Tooltip>
+        )}
 
         <Tooltip title={t('menu.models')} placement="right" arrow>
           <Box
@@ -220,20 +228,44 @@ const ActivityBar: React.FC = () => {
       </Box>
 
       <Box sx={{ display: 'flex', flexDirection: 'column', pb: 0.5 }}>
+        {webRuntime && (
+          <Tooltip title="您的账号" placement="right" arrow>
+            <Box
+              onClick={() => toggleTab('tab-account', '您的账号', '/account')}
+              sx={iconSx(activeTabId === 'tab-account')}
+            >
+              <AccountCircleIcon sx={iconGraphicSx} />
+            </Box>
+          </Tooltip>
+        )}
+
+        {webRuntime && webAdmin && (
+          <Tooltip title="管理后台" placement="right" arrow>
+            <Box
+              onClick={() => toggleTab('tab-web-admin', '管理后台', '/web-admin')}
+              sx={iconSx(activeTabId === 'tab-web-admin')}
+            >
+              <ManageAccountsIcon sx={iconGraphicSx} />
+            </Box>
+          </Tooltip>
+        )}
+
         <Tooltip title={t('menu.terminal')} placement="right" arrow>
           <Box onClick={() => dispatch(toggleBottomPanel())} sx={iconSx(bottomPanelVisible)}>
             <TerminalIcon sx={iconGraphicSx} />
           </Box>
         </Tooltip>
 
-        <Tooltip title={t('menu.settings')} placement="right" arrow>
-          <Box
-            onClick={() => toggleTab('tab-settings', t('menu.settings'), '/settings')}
-            sx={iconSx(activeTabId === 'tab-settings')}
-          >
-            <SettingsIcon sx={iconGraphicSx} />
-          </Box>
-        </Tooltip>
+        {showAdminOnlyItems && (
+          <Tooltip title={t('menu.settings')} placement="right" arrow>
+            <Box
+              onClick={() => toggleTab('tab-settings', t('menu.settings'), '/settings')}
+              sx={iconSx(activeTabId === 'tab-settings')}
+            >
+              <SettingsIcon sx={iconGraphicSx} />
+            </Box>
+          </Tooltip>
+        )}
       </Box>
     </Box>
   )

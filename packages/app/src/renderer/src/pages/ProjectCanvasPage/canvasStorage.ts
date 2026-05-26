@@ -14,6 +14,7 @@ import { restoreGlobalQAppCache } from '../QuickAppPage/components/QAppContext'
 import { buildProjectStorageDirName, getProjectById } from '../MainPage/projectStore'
 import { getDownloadFileNameFromUrl, normalizeLocalMediaUrl } from '../ChatPage/chatPageShared'
 import { normalizeFileMimeType } from '@renderer/utils/fileDisplay'
+import { isMagicPotWebRuntime, triggerBrowserDownload } from '@renderer/utils/webRuntime'
 import { sanitizeFilePart } from './canvasExportNamingUtils'
 import { extractMimeTypeFromSourceUrl } from './canvasImageMetadata'
 
@@ -2042,6 +2043,15 @@ export async function exportCanvasFile(
   const json = JSON.stringify(canvasFileData)
   const blobCount = Object.keys(canvasFileData.blobs || {}).length
   const cachedTargetPath = getCanvasSaveTargetPath(canvasId)
+
+  if (isMagicPotWebRuntime()) {
+    triggerBrowserDownload(json, name, 'application/json')
+    console.log(
+      `[Canvas Export] Downloaded ${items.length} items as ${name}` +
+        (blobCount > 0 ? ` (${blobCount} embedded assets)` : '')
+    )
+    return
+  }
 
   if (!forceSaveAs && cachedTargetPath && window.api?.svcFs && window.path) {
     try {

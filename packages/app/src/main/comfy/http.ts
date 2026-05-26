@@ -77,8 +77,15 @@ export class ComfyHttpCli {
   }
 
   async installed(): Promise<Record<string, CustomNodeInfo>> {
-    const response = await this.get('/customnode/installed')
-    return response as Record<string, CustomNodeInfo>
+    const url = new URL('/customnode/installed', this.host()).href
+    const response = await fetch(url)
+    if (response.status === 404) {
+      return {}
+    }
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    return (await response.json()) as Record<string, CustomNodeInfo>
   }
 
   async objectInfo(): Promise<ObjectInfoMap> {

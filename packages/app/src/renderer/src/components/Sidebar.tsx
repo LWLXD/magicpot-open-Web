@@ -18,6 +18,7 @@ import SidebarCollapseProvider from './SidebarCollapseProvider'
 import { useSidebarCollapse } from './SidebarCollapseContext'
 import SidebarHeader from './SidebarHeader'
 import { useTranslation } from 'react-i18next'
+import { isMagicPotWebRuntime, isMagicPotWebAdmin } from '../utils/webRuntime'
 
 // 尺寸与动画时间
 const SIDEBAR_WIDTH = 236
@@ -90,6 +91,8 @@ const SidebarInner: React.FC = () => {
   const currentPage = getIdByPath(location.pathname)
   const handlePageChange = (page: PageType) => navigate(getPathById(page))
   const menuItems = getSidebarRoutes()
+  const webRuntime = isMagicPotWebRuntime()
+  const webAdmin = isMagicPotWebAdmin()
 
   const { collapsed } = useSidebarCollapse()
 
@@ -121,6 +124,7 @@ const SidebarInner: React.FC = () => {
               .filter((item) => pythonCmdAvailable || !item.onlyWhenPythonCmdAvailable)
               .filter((item) => comfyUICommandAvailable || !item.onlyWhenComfyUICommandAvailable)
               .filter((item) => !isRemoteLLMMode || !item.hideWhenRemoteLLM)
+              .filter((item) => !webRuntime || webAdmin || !item.webAdminOnly)
               .map((item) => {
                 const selected = currentPage === item.id
                 // @ts-ignore labelKey is valid

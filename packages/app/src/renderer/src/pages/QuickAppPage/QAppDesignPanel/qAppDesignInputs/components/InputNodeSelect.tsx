@@ -10,6 +10,7 @@ import { JsonPath } from '@shared/utils/jsonPath'
 import { Box, Typography } from '@mui/material'
 import {
   fieldByJsonPath,
+  isComfyUIBuiltinNode,
   nodeIdAndClsByJsonPath,
   parseAllNodeIdAndField
 } from '@shared/comfy/funcs'
@@ -81,7 +82,7 @@ const InputNodeSelect: React.FC<InputNodeSelectProps> = ({
           objInfoNode?.input?.required?.[field] || objInfoNode?.input?.optional?.[field] || null
         return { nodeId, field, node, objInfoNode, objInfoField }
       })
-      .filter(({ node }) => node !== null)
+      .filter(({ node }) => node !== null && !isComfyUIBuiltinNode(node.class_type))
 
     const filtered = allNodeAndObjInfo
       .filter(({ objInfoNode }) => {
@@ -127,7 +128,7 @@ const InputNodeSelect: React.FC<InputNodeSelectProps> = ({
           objInfoNode?.input?.required?.[field] || objInfoNode?.input?.optional?.[field] || null
         return { nodeId, field, node, objInfoNode, objInfoField }
       })
-      .filter(({ node }) => node !== null)
+      .filter(({ node }) => node !== null && !isComfyUIBuiltinNode(node.class_type))
 
     // 节点过滤：只应用 allowNodeCondition，不应用 allowFieldCondition
     // 这样即使节点没有符合条件的字段，只要节点本身符合条件，就会出现在节点下拉框中

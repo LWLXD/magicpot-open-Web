@@ -5,6 +5,11 @@ import ResultIconButtonBase from './components/ResultIconButtonBase'
 import { ArrowOutward, DownloadOutlined, SendOutlined } from '@mui/icons-material'
 import { downloadFile, extractWorkflowFromImage } from '@renderer/utils/fileUtils'
 import { api } from '@renderer/utils/windowUtils'
+import {
+  isMagicPotWebRuntime,
+  triggerBrowserDownload,
+  writeImageBytesToBrowserClipboard
+} from '@renderer/utils/webRuntime'
 import { ZoomInOutlined } from '@mui/icons-material'
 import { useState, useEffect } from 'react'
 import ModalLayout from '@renderer/components/ModalLayout'
@@ -80,7 +85,15 @@ const ResultCardImage: ResultCardComponent<'image'> = ({
       const response = await fetch(result.objectUrl)
       const blob = await response.blob()
       const arrayBuffer = await blob.arrayBuffer()
-      const res = await api().svcHyper.writeImageToClipboard({ data: new Uint8Array(arrayBuffer) })
+      const data = new Uint8Array(arrayBuffer)
+
+      if (isMagicPotWebRuntime()) {
+        await writeImageBytesToBrowserClipboard(data, blob.type || 'image/png')
+        notifySuccess(t('quickapp.results.copy_success'))
+        return
+      }
+
+      const res = await api().svcHyper.writeImageToClipboard({ data })
       if (res.success) {
         notifySuccess(t('quickapp.results.copy_success'))
       } else {
@@ -252,6 +265,19 @@ const ResultCardImage: ResultCardComponent<'image'> = ({
           tooltip={t('quickapp.results.download_image')}
           onClick={async () => {
             try {
+              const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+              const fileName = `${t('quickapp.results.generated_image')}_${timestamp}.png`
+              const response = await fetch(result.objectUrl)
+              const blob = await response.blob()
+              const arrayBuffer = await blob.arrayBuffer()
+              const data = new Uint8Array(arrayBuffer)
+
+              if (isMagicPotWebRuntime()) {
+                triggerBrowserDownload(data, fileName, blob.type || 'image/png')
+                notifySuccess(t('quickapp.results.download_success'))
+                return
+              }
+
               const DOWNLOAD_DIR_KEY = 'qapp.downloadDir'
               let downloadDir = localStorage.getItem(DOWNLOAD_DIR_KEY) || config.download_dir
 
@@ -268,12 +294,6 @@ const ResultCardImage: ResultCardComponent<'image'> = ({
                 api().svcState.saveConfig({ config: { download_dir: downloadDir } })
               }
 
-              const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-              const fileName = `${t('quickapp.results.generated_image')}_${timestamp}.png`
-              const response = await fetch(result.objectUrl)
-              const blob = await response.blob()
-              const arrayBuffer = await blob.arrayBuffer()
-              const data = new Uint8Array(arrayBuffer)
               const res = await api().svcHyper.saveImageToDir({ data, fileName, dir: downloadDir })
               console.log(`[下载] 已保存到 ${res.savedPath}`)
             } catch (error) {

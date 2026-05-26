@@ -52,7 +52,9 @@ const SYSTEM_ROUTE_TAB_IDS: Record<string, string> = {
   '/qappdesign': 'tab-design',
   '/target-manager': 'tab-design',
   '/custom-skill-manager': 'tab-design',
-  '/model': 'tab-model'
+  '/model': 'tab-model',
+  '/web-admin': 'tab-web-admin',
+  '/account': 'tab-account'
 }
 
 export const resolveTabIdForCurrentRoute = (

@@ -42,6 +42,32 @@ type InputComfyImageMaskProps = InputProps<string> & {
   placeholder: string
 }
 
+const isLikelyImageBytes = (bytes: Uint8Array): boolean => {
+  if (bytes.length < 4) return false
+  const startsWith = (...signature: number[]) =>
+    signature.every((value, index) => bytes[index] === value)
+
+  return (
+    startsWith(0x89, 0x50, 0x4e, 0x47) ||
+    startsWith(0xff, 0xd8, 0xff) ||
+    startsWith(0x47, 0x49, 0x46, 0x38) ||
+    startsWith(0x42, 0x4d) ||
+    startsWith(0x49, 0x49, 0x2a, 0x00) ||
+    startsWith(0x4d, 0x4d, 0x00, 0x2a) ||
+    (bytes.length >= 12 &&
+      startsWith(0x52, 0x49, 0x46, 0x46) &&
+      bytes[8] === 0x57 &&
+      bytes[9] === 0x45 &&
+      bytes[10] === 0x42 &&
+      bytes[11] === 0x50) ||
+    (bytes.length >= 12 &&
+      bytes[4] === 0x66 &&
+      bytes[5] === 0x74 &&
+      bytes[6] === 0x79 &&
+      bytes[7] === 0x70)
+  )
+}
+
 const InputComfyImageMask: React.FC<InputComfyImageMaskProps> = ({
   value,
   label,
@@ -91,6 +117,9 @@ const InputComfyImageMask: React.FC<InputComfyImageMaskProps> = ({
   const viewImage = useCallback(async () => {
     const res = await api().svcComfy.getView(valueToFileItem(internalValue))
     const image: Uint8Array = res.result
+    if (!isLikelyImageBytes(image)) {
+      throw new Error('invalid image bytes')
+    }
     return image
   }, [internalValue])
 

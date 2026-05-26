@@ -2,8 +2,9 @@ import type { Config } from '@shared/config/config'
 import { initServerIpc } from './api/serverIpc'
 import { initializeAgentKernelRuntime, refreshAgentKernelRuntime } from './agentKernel/runtime'
 import { initComfyStateListener, stopComfyStateListener } from './comfy/state'
-import { initConfig, listenConfig } from './config/config'
+import { getConfig, initConfig, listenConfig } from './config/config'
 import { startLLMProxyServer, stopLLMProxyServer } from './llmProxy/server'
+import { HyperSvcImpl } from './api/svcHyperImpl'
 import {
   readMagicPotMcpPlatformEnv,
   syncMagicPotMcpPlatformDesktopTransports,
@@ -13,7 +14,10 @@ import { stopMcpClientManager, syncMcpClientManager } from './mcp/runtime'
 import { initTaskQueue, stopTaskQueue } from './queue/taskQueue'
 import { cleanupSubProcesses } from './subprocess/subprocess'
 import { setConsoleTransportEnabled } from './utils/loggingOverride'
+import { startMagicPotWebServer, stopMagicPotWebServer } from './webServer/webApiServer'
 import { winController } from './winControls'
+
+let localComfyAutoStartInFlight = false
 
 async function runLifecycleStep(
   stepName: string,
@@ -50,6 +54,37 @@ function syncLlmProxyServer(config: Config): void {
   }
 }
 
+async function syncWebServer(config: Config): Promise<void> {
+  await startMagicPotWebServer(config)
+}
+
+function ensureLocalComfyUIStarted(config: Config): void {
+  if (config.use_remote_comfyui || localComfyAutoStartInFlight) {
+    return
+  }
+
+  localComfyAutoStartInFlight = true
+  const svc = new HyperSvcImpl()
+
+  void svc
+    .startComfyUI(
+      {},
+      {
+        onData: (data) => {
+          if (data.logLine) {
+            console.log(data.logLine)
+          }
+        }
+      }
+    )
+    .catch((error) => {
+      console.error('[App] Local ComfyUI auto-start failed', error)
+    })
+    .finally(() => {
+      localComfyAutoStartInFlight = false
+    })
+}
+
 function startBackgroundTasks(): void {
   initTaskQueue().catch((error) => console.error('[App] TaskQueue init failed', error))
   initComfyStateListener()
@@ -65,6 +100,8 @@ function registerRuntimeServiceManager(
     onEvent: async (config) => {
       await refreshRuntimeServices(config, mcpPlatformEnv)
       syncLlmProxyServer(config)
+      await syncWebServer(config)
+      ensureLocalComfyUIStarted(config)
     },
     onEnd: async () => {}
   })
@@ -83,6 +120,7 @@ export async function beforeShow() {
   console.log('[App] Launching background tasks...')
 
   startBackgroundTasks()
+  ensureLocalComfyUIStarted(getConfig())
 
   await runLifecycleStep('Runtime services synced', async () => {
     await syncRuntimeServices()
@@ -91,12 +129,14 @@ export async function beforeShow() {
   })
 
   await runLifecycleStep('LLM server started', () => startLLMProxyServer())
+  await runLifecycleStep('MagicPot web server started', () => startMagicPotWebServer(getConfig()))
   registerRuntimeServiceManager(mcpPlatformEnv)
 
   console.log('[App] beforeShow finished')
 }
 
 export async function beforeQuit() {
+  await runLifecycleStep('MagicPot web server stopped', () => stopMagicPotWebServer())
   await runLifecycleStep('LLM server stopped', () => stopLLMProxyServer())
   await runLifecycleStep('MCP clients stopped', () => stopMcpClientManager())
   await runLifecycleStep('MCP platform stopped', () => stopMagicPotMcpPlatformRuntime())

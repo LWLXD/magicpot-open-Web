@@ -1,5 +1,11 @@
 import { useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 import { api } from '../../utils/windowUtils'
+import {
+  isMagicPotWebRuntime,
+  writeBlobToBrowserClipboard,
+  writeImageBytesToBrowserClipboard,
+  writeTextToBrowserClipboard
+} from '../../utils/webRuntime'
 import { removeCanvasItemsWithAttachedCaptions } from './canvasAttachedCaptionUtils'
 import type { CanvasTool, ExportImageFormat, ExportMenuScope } from './projectCanvasPageShared'
 import type { SelectionRect } from './useCanvasTargetWorkflow'
@@ -158,6 +164,21 @@ async function copyImageToClipboard(item: CanvasImageItem) {
     if (isSvgCanvasImage(item)) {
       const svg = await readClipboardSvgMarkup(item)
       if (svg.trim()) {
+        if (isMagicPotWebRuntime()) {
+          try {
+            await writeBlobToBrowserClipboard(
+              new Blob([svg], { type: 'image/svg+xml' }),
+              'image/svg+xml'
+            )
+            console.log('[Canvas] SVG copied to browser clipboard')
+            return
+          } catch {
+            await writeTextToBrowserClipboard(svg)
+            console.log('[Canvas] SVG markup copied to browser clipboard')
+            return
+          }
+        }
+
         const svgResult = await api().svcHyper.writeSvgToClipboard({ svg })
         if (svgResult.success) {
           console.log('[Canvas] SVG copied to clipboard')
@@ -169,6 +190,12 @@ async function copyImageToClipboard(item: CanvasImageItem) {
     }
 
     const data = await readClipboardImageBytes(item)
+    if (isMagicPotWebRuntime()) {
+      await writeImageBytesToBrowserClipboard(data, 'image/png')
+      console.log('[Canvas] Image copied to browser clipboard')
+      return
+    }
+
     const res = await api().svcHyper.writeImageToClipboard({ data })
 
     if (res.success) {

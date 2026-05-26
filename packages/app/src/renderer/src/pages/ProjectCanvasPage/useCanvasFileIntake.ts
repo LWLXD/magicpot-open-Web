@@ -8,6 +8,7 @@ import {
 } from 'react'
 import { hasActiveQuickAppImagePasteTarget } from '@renderer/utils/quickAppPasteTarget'
 import { api } from '@renderer/utils/windowUtils'
+import { getMagicPotWebImageClipboardFile, isMagicPotWebRuntime } from '@renderer/utils/webRuntime'
 import {
   getDroppedAttachmentFile,
   parseInternalImageDragPayload
@@ -1057,6 +1058,14 @@ export function useCanvasFileIntake({
 
   const handleClipboardData = useCallback(
     async (clipboardData?: DataTransfer | null) => {
+      if (isMagicPotWebRuntime()) {
+        const magicPotClipboardFile = getMagicPotWebImageClipboardFile()
+        if (magicPotClipboardFile) {
+          await handleFile(magicPotClipboardFile)
+          return true
+        }
+      }
+
       const pastedFiles = clipboardData?.files
         ? Array.from(clipboardData.files).map((file, index) =>
             normalizeClipboardFile(file, file.type, index + 1)

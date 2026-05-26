@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../utils/windowUtils'
+import { isMagicPotWebRuntime, triggerBrowserDownload } from '../../utils/webRuntime'
 import { buildCanvasFileContentUpdate } from './canvasAgentAttachmentUtils'
 import {
   buildCanvasFileExportSuggestedName,
@@ -235,6 +236,14 @@ export function useCanvasFilePreview({
       const parsedName = window.path.parse(exportFile.name)
       const suggestedName = `${parsedName.name || 'document'}-export${parsedName.ext}`
       const extension = window.path.extname(exportFile.name).replace(/^\./, '').toLowerCase()
+      const data = new Uint8Array(await exportFile.arrayBuffer())
+
+      if (isMagicPotWebRuntime()) {
+        triggerBrowserDownload(data, suggestedName, exportFile.type || 'application/octet-stream')
+        notifySuccess(`Exported ${suggestedName}`)
+        return
+      }
+
       const result = await api().svcDialog.showSaveDialog({
         title: isEditableSpreadsheetCanvasFile(exportFile.name)
           ? i18n.resolvedLanguage?.toLowerCase().startsWith('zh')
@@ -253,7 +262,6 @@ export function useCanvasFilePreview({
         return
       }
 
-      const data = new Uint8Array(await exportFile.arrayBuffer())
       await api().svcFs.saveImageToPath({
         image: data,
         outputPath: window.path.dirname(result.filePath),
@@ -314,6 +322,23 @@ export function useCanvasFilePreview({
         if (format !== 'original') {
           const suggestedName = buildCanvasFileExportSuggestedName(fileItem, format)
           const extension = getCanvasFileExportExtension(format, fileItem).replace(/^\./, '')
+          if (isMagicPotWebRuntime()) {
+            const targetPath = normalizeCanvasFileExportTargetPath(suggestedName, format, fileItem)
+            const exportFile = await buildCanvasGeneratedExportFile(
+              await resolveDocumentExportText(fileItem, activeDraft),
+              window.path.basename(targetPath),
+              format
+            )
+            const data = new Uint8Array(await exportFile.arrayBuffer())
+            triggerBrowserDownload(
+              data,
+              window.path.basename(targetPath),
+              exportFile.type || 'application/octet-stream'
+            )
+            notifySuccess(`Exported ${window.path.basename(targetPath)}`)
+            return
+          }
+
           const result = await api().svcDialog.showSaveDialog({
             title: getCanvasFileExportDialogTitle(format, i18n.resolvedLanguage || i18n.language),
             defaultPath: suggestedName,

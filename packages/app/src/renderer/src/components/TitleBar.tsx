@@ -130,7 +130,9 @@ const SYSTEM_TAB_I18N_MAP: Record<string, string> = {
   'tab-home': 'project.my',
   'tab-settings': 'menu.settings',
   'tab-design': 'menu.custom_workshop',
-  'tab-model': 'menu.models'
+  'tab-model': 'menu.models',
+  'tab-web-admin': '管理后台',
+  'tab-account': '您的账号'
 }
 
 const baseIconFilter = (mode: 'light' | 'dark') =>

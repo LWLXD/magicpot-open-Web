@@ -3,6 +3,11 @@ import React from 'react'
 import { Menu, MenuItem } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 import { api } from '@renderer/utils/windowUtils'
+import {
+  isMagicPotWebRuntime,
+  triggerBrowserDownload,
+  writeImageBytesToBrowserClipboard
+} from '@renderer/utils/webRuntime'
 import { useMessage } from '@renderer/hooks/useMessage'
 
 interface ImageContextMenuProps {
@@ -28,7 +33,16 @@ const ImageContextMenu: React.FC<ImageContextMenuProps> = ({
       const response = await fetch(imageUrl)
       const blob = await response.blob()
       const arrayBuffer = await blob.arrayBuffer()
-      const res = await api().svcHyper.writeImageToClipboard({ data: new Uint8Array(arrayBuffer) })
+      const data = new Uint8Array(arrayBuffer)
+
+      if (isMagicPotWebRuntime()) {
+        await writeImageBytesToBrowserClipboard(data, blob.type || 'image/png')
+        notifySuccess(t('chat.image_copied'))
+        onClose()
+        return
+      }
+
+      const res = await api().svcHyper.writeImageToClipboard({ data })
       if (res.success) {
         notifySuccess(t('chat.image_copied'))
       } else {
@@ -66,6 +80,19 @@ const ImageContextMenu: React.FC<ImageContextMenuProps> = ({
         onClick={async () => {
           if (imageContextMenu) {
             try {
+              const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+              const fileName = `image_${timestamp}.png`
+              const response = await fetch(imageContextMenu.imageUrl || '')
+              const blob = await response.blob()
+              const arrayBuffer = await blob.arrayBuffer()
+              const data = new Uint8Array(arrayBuffer)
+
+              if (isMagicPotWebRuntime()) {
+                triggerBrowserDownload(data, fileName, blob.type || 'image/png')
+                onClose()
+                return
+              }
+
               const DOWNLOAD_DIR_KEY = 'qapp.downloadDir'
               let downloadDir = localStorage.getItem(DOWNLOAD_DIR_KEY) || config.download_dir
 
@@ -83,12 +110,6 @@ const ImageContextMenu: React.FC<ImageContextMenuProps> = ({
                 api().svcState.saveConfig({ config: { download_dir: downloadDir } })
               }
 
-              const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-              const fileName = `image_${timestamp}.png`
-              const response = await fetch(imageContextMenu.imageUrl || '')
-              const blob = await response.blob()
-              const arrayBuffer = await blob.arrayBuffer()
-              const data = new Uint8Array(arrayBuffer)
               const res = await api().svcHyper.saveImageToDir({
                 data,
                 fileName,
