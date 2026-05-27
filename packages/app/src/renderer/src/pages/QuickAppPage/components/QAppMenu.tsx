@@ -40,6 +40,7 @@ import { useMessage } from '@renderer/hooks/useMessage'
 import { useComfyEventCallback } from '@renderer/hooks/useComfyEvent'
 import { api } from '@renderer/utils/windowUtils'
 import { QAppMenuItem } from '@shared/api/svcQApp'
+import { isComfyFrontendOnlyNodeClassType } from '@shared/comfy/funcs'
 import type { Config } from '@shared/config/config'
 import { useConfig } from '@renderer/hooks/useConfig'
 import { useTranslation } from 'react-i18next'
@@ -300,6 +301,7 @@ const CascadingMenuItem = memo(
     const displayName = getDisplayName(qAppItem.name) || getDisplayName(qAppItem.key)
     const itemRef = useRef<HTMLDivElement | null>(null)
     const [isPinned, setIsPinned] = useState(false)
+    const canCancelRun = isBuiltinDuplicateCheckQApp(qAppItem.key) && Boolean(isRunning)
 
     // 进度条状态
     const [progress, setProgress] = useState(0)
@@ -469,14 +471,14 @@ const CascadingMenuItem = memo(
                   p: 0.5,
                   flexShrink: 0,
                   ml: 0.5,
-                  color: isRunning ? '#fff' : '#7E73FD',
-                  bgcolor: isRunning ? '#d32f2f' : '#ffffff',
+                  color: canCancelRun ? '#fff' : '#7E73FD',
+                  bgcolor: canCancelRun ? '#d32f2f' : '#ffffff',
                   borderRadius: 1,
                   boxShadow: '0 2px 4px rgba(0,0,0,0.15)',
                   transition:
                     'background-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease',
                   '&:hover': {
-                    bgcolor: isRunning ? '#b71c1c' : '#f8f8f8',
+                    bgcolor: canCancelRun ? '#b71c1c' : '#f8f8f8',
                     transform: 'scale(1.12)',
                     boxShadow: '0 4px 8px rgba(0,0,0,0.2)'
                   },
@@ -485,7 +487,7 @@ const CascadingMenuItem = memo(
                   }
                 }}
               >
-                {isRunning ? (
+                {canCancelRun ? (
                   <Box sx={{ width: 10, height: 10, bgcolor: '#fff', borderRadius: 0.5 }} />
                 ) : (
                   <PlayArrowIcon sx={{ fontSize: 20 }} />
@@ -1098,7 +1100,11 @@ export default function QAppMenu({
 
           // 如果是 LoRA 相关节点，不计入匹配（因为这些节点可能被动态增减）
           const classType = String(templateNode.class_type)
-          if (classType === 'LoraLoader' || classType === 'LoraLoaderModelOnly') {
+          if (
+            classType === 'LoraLoader' ||
+            classType === 'LoraLoaderModelOnly' ||
+            isComfyFrontendOnlyNodeClassType(classType)
+          ) {
             skipped++
             continue
           }
@@ -1116,7 +1122,11 @@ export default function QAppMenu({
         const imageNonLoraKeys = imageKeys.filter((k) => {
           const n = imageWf[k] as Record<string, unknown> | undefined
           const ct = String(n?.class_type || '')
-          return ct !== 'LoraLoader' && ct !== 'LoraLoaderModelOnly'
+          return (
+            ct !== 'LoraLoader' &&
+            ct !== 'LoraLoaderModelOnly' &&
+            !isComfyFrontendOnlyNodeClassType(ct)
+          )
         })
         const sizeDiffRatio =
           Math.abs(imageNonLoraKeys.length - coreTemplateNodes) / coreTemplateNodes

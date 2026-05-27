@@ -1,6 +1,7 @@
 import { api } from '@renderer/utils/windowUtils'
 import { findNotInstalledNodeInfo } from '@shared/comfy/funcs'
 import type { ObjectInfoMap, Workflow } from '@shared/comfy/types'
+import type { Config } from '@shared/config/config'
 import type { ConfigUtils } from '@shared/config/configUtils'
 import type { QAppCfg, QAppRequiredModel } from '@shared/qApp/cfgTypes'
 
@@ -26,6 +27,8 @@ export type QAppDependencyReport = {
   customNodes: QAppCustomNodeDependency[]
 }
 
+type QAppDependencyCheckConfig = Pick<Config, 'use_remote_comfyui'>
+
 export function getRequiredModelBaseDir(
   model: QAppRequiredModel
 ): NonNullable<QAppRequiredModel['baseDir']> {
@@ -35,15 +38,13 @@ export function getRequiredModelBaseDir(
 export function resolveRequiredModelPaths(
   model: QAppRequiredModel,
   comfyDir: string,
-  homeDir: string
+  portableHomeDir: string
 ): { filePath: string; dirPath: string; displayDir: string } {
-  const rootDir = getRequiredModelBaseDir(model) === 'userHome' ? homeDir : comfyDir
+  const baseDir = getRequiredModelBaseDir(model)
+  const rootDir = baseDir === 'portableHome' ? portableHomeDir : comfyDir
   const dirPath = window.path.join(rootDir, model.dir)
   const filePath = window.path.join(dirPath, model.name)
-  const displayDir =
-    getRequiredModelBaseDir(model) === 'userHome'
-      ? dirPath
-      : `ComfyUI\\${model.dir.replace(/\//g, '\\')}`
+  const displayDir = baseDir === 'comfyui' ? `ComfyUI\\${model.dir.replace(/\//g, '\\')}` : dirPath
 
   return { filePath, dirPath, displayDir }
 }
@@ -92,9 +93,14 @@ export function resolveCustomNodeDependency(
 
 export async function checkRequiredModels(
   requiredModels: QAppRequiredModel[] | undefined,
-  configUtils: ConfigUtils
+  configUtils: ConfigUtils,
+  config: QAppDependencyCheckConfig
 ): Promise<MissingRequiredModel[]> {
   if (!requiredModels || requiredModels.length === 0) {
+    return []
+  }
+
+  if (config.use_remote_comfyui) {
     return []
   }
 
@@ -103,11 +109,10 @@ export async function checkRequiredModels(
     return []
   }
 
-  const needsHomeDir = requiredModels.some((model) => getRequiredModelBaseDir(model) === 'userHome')
-  const homeDir = needsHomeDir ? await api().svcShell.getHomeDir() : ''
+  const portableHomeDir = configUtils.getPortablePythonHomeDir()
   const resolvedModels = requiredModels.map((model) => ({
     model,
-    ...resolveRequiredModelPaths(model, comfyDir, homeDir)
+    ...resolveRequiredModelPaths(model, comfyDir, portableHomeDir)
   }))
   const exists = await api().svcShell.fileExistsBatch(resolvedModels.map((model) => model.filePath))
 
@@ -141,9 +146,14 @@ export async function checkQAppDependencies(options: {
   workflow: Workflow | null | undefined
   objectInfos: ObjectInfoMap
   configUtils: ConfigUtils
+  config: QAppDependencyCheckConfig
 }): Promise<QAppDependencyReport> {
   const cfg = options.cfg
-  const missingModels = await checkRequiredModels(cfg?.requiredModels, options.configUtils)
+  const missingModels = await checkRequiredModels(
+    cfg?.requiredModels,
+    options.configUtils,
+    options.config
+  )
   const customNodes = await checkCustomNodeDependencies(cfg?.customNodeUrls, options.configUtils)
   const hasObjectInfos = options.objectInfos && Object.keys(options.objectInfos).length > 0
   const missingNodeClasses =

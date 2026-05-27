@@ -1,6 +1,6 @@
 {
   "name": "aiengineelectron",
-  "version": "1.0.105",
+  "version": "1.0.107",
   "description": "An Electron application with React and TypeScript",
   "main": "./out/main/index.js",
   "author": "example.com",
@@ -30,11 +30,11 @@
     "typecheck:node": "tsc --noEmit -p config/tsconfig/tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p config/tsconfig/tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
-    "start:pure": "electron-vite preview --config config/electron/electron.vite.config.ts --mode pure",
-    "start:embedded": "electron-vite preview --config config/electron/electron.vite.config.ts --mode embedded",
+    "start:pure": "node scripts/run-electron-vite.mjs preview --mode pure",
+    "start:embedded": "node scripts/run-electron-vite.mjs preview --mode embedded",
     "start": "npm run start:pure",
-    "dev:pure": "chcp 65001 >nul && electron-vite dev --config config/electron/electron.vite.config.ts -w --mode pure",
-    "dev:embedded": "cross-env-shell VITE_BUILD_MODE=embedded VITE_PACKAGE_MODE=embedded VITE_BUILD_MODE_NAME=Embedded VITE_MAGICPOT_AUTO_START_COMFYUI=true \"chcp 65001 >nul && electron-vite dev --config config/electron/electron.vite.config.ts -w --mode embedded\"",
+    "dev:pure": "chcp 65001 >nul && node scripts/run-electron-vite.mjs dev --mode pure",
+    "dev:embedded": "cross-env-shell VITE_BUILD_MODE=embedded VITE_PACKAGE_MODE=embedded VITE_BUILD_MODE_NAME=Embedded VITE_MAGICPOT_AUTO_START_COMFYUI=true \"chcp 65001 >nul && node scripts/run-electron-vite.mjs dev --mode embedded\"",
     "dev": "cross-env VITE_MAGICPOT_AUTO_START_COMFYUI=true npm run dev:pure",
     "build:pure": "npm run typecheck && electron-vite build --config config/electron/electron.vite.config.ts --mode pure",
     "build:embedded": "npm run typecheck && electron-vite build --config config/electron/electron.vite.config.ts --mode embedded",
@@ -54,6 +54,7 @@
     "release:embedded:win": "npm run build:embedded && npm run prepare:embedded && cross-env PACKAGE_MODE=embedded npm run package:win",
     "release:update-submodules": "node scripts/release/update-embedded-submodules.mjs",
     "test:node": "cross-env NODE_OPTIONS=--max-old-space-size=6144 vitest run --config config/vitest/vitest.node.config.mjs",
+    "test:core:coverage": "cross-env NODE_OPTIONS=--max-old-space-size=6144 vitest run --config config/vitest/vitest.core.config.mjs",
     "test:web:heavy:qapp-design": "cross-env NODE_OPTIONS=--max-old-space-size=6144 vitest run --config config/vitest/vitest.web.config.mjs packages/app/src/renderer/src/pages/QuickAppPage/QAppDesignPanel/QAppDesignPanel.test.tsx",
     "test:web:heavy:custom-skill-manager": "cross-env NODE_OPTIONS=--max-old-space-size=6144 vitest run --config config/vitest/vitest.web.config.mjs packages/app/src/renderer/src/pages/QuickAppPage/CustomSkillManagerPage.test.tsx",
     "test:web:heavy:panel-plugin": "cross-env NODE_OPTIONS=--max-old-space-size=6144 vitest run --config config/vitest/vitest.web.config.mjs packages/app/src/renderer/src/pages/SettingsPage/PanelPlugin.test.tsx",
@@ -164,9 +165,10 @@
     "@types/react-syntax-highlighter": "^15.5.13",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.7.0",
+    "@vitest/coverage-v8": "^3.2.4",
     "cross-env": "^10.0.0",
     "electron": "^39.8.10",
-    "electron-builder": "^25.1.8",
+    "electron-builder": "^26.8.1",
     "electron-devtools-installer": "^4.0.0",
     "electron-vite": "^4.0.0",
     "eslint": "^9.34.0",
@@ -184,7 +186,7 @@
     "rollup-plugin-obfuscator": "^1.1.0",
     "ts-json-schema-generator": "^2.4.0",
     "typescript": "^5.8.3",
-    "vite": "^7.0.5",
+    "vite": "^7.3.3",
     "vitest": "^3.2.4"
   },
   "optionalDependencies": {
@@ -212,7 +214,7 @@
     "hono": "4.12.18",
     "ip-address": "10.2.0",
     "postcss": "8.5.14",
-    "protobufjs": "7.5.6"
+    "protobufjs": "7.5.9"
   },
   "prettier": "./config/prettier/prettier.config.cjs"
 }

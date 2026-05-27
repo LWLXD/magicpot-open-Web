@@ -12,6 +12,7 @@ import type {
 import type { CanvasFigmaBinding } from '@shared/figma'
 import { restoreGlobalQAppCache } from '../QuickAppPage/components/QAppContext'
 import { buildProjectStorageDirName, getProjectById } from '../MainPage/projectStore'
+import { normalizeGeneratedRootDirName, unprefixGeneratedRootDirName } from '@shared/projectStorage'
 import { getDownloadFileNameFromUrl, normalizeLocalMediaUrl } from '../ChatPage/chatPageShared'
 import { normalizeFileMimeType } from '@renderer/utils/fileDisplay'
 import { isMagicPotWebRuntime, triggerBrowserDownload } from '@renderer/utils/webRuntime'
@@ -22,6 +23,7 @@ const DB_NAME = 'magicpot-canvas'
 const DB_VERSION = 2 // bumped for new blob store
 const STORE_NAME = 'canvas-items'
 const BLOB_STORE_NAME = 'canvas-blobs' // Stores binary payloads such as 3D models and videos.
+const BLOB_STORE_KEY_SEPARATOR = '::canvas::'
 const KEY = 'default' // Single-canvas scene; use a fixed key.
 const PROJECT_STORAGE_FALLBACK_ROOT_DIR = 'renderer-state'
 const PROJECT_STORAGE_FALLBACK_NAMESPACE = 'project-canvas'
@@ -48,8 +50,10 @@ type CanvasSnapshot = {
 
 type ProjectCanvasLocation = {
   projectRootDir: string
+  legacyProjectRootDir?: string
   canvasFilename: string
   canvasFullPath: string
+  legacyCanvasFullPath?: string
   assetDir: string
 }
 
@@ -105,7 +109,7 @@ function openDB(): Promise<IDBDatabase> {
 function serializeItems(items: CanvasItem[]): SerializableCanvasItem[] {
   return items.map((item) => {
     if (item.type === 'image') {
-      const { image, ...rest } = item
+      const { image, sourceFile, ...rest } = item
       const sourceWidth =
         typeof rest.sourceWidth === 'number' &&
         Number.isFinite(rest.sourceWidth) &&
@@ -133,7 +137,14 @@ function serializeItems(items: CanvasItem[]): SerializableCanvasItem[] {
       return rest as SerializableCanvasItem
     }
     if (item.type === 'model3d') {
-      const { deferRender, ...rest } = item as CanvasItem & { deferRender?: boolean }
+      const { deferRender, sourceFile, ...rest } = item as CanvasItem & {
+        deferRender?: boolean
+        sourceFile?: Blob
+      }
+      return rest as SerializableCanvasItem
+    }
+    if (item.type === 'video' || item.type === 'file') {
+      const { sourceFile, ...rest } = item
       return rest as SerializableCanvasItem
     }
     return item as SerializableCanvasItem
@@ -141,20 +152,6 @@ function serializeItems(items: CanvasItem[]): SerializableCanvasItem[] {
 }
 
 // Blob persistence helpers.
-
-/**
- * Fetch a blob URL as an ArrayBuffer for persistence.
- */
-async function fetchBlobAsArrayBuffer(blobUrl: string): Promise<ArrayBuffer | null> {
-  try {
-    const resp = await fetch(blobUrl)
-    if (!resp.ok) return null
-    return await resp.arrayBuffer()
-  } catch {
-    console.warn('[Canvas Storage] 无法获取 blob 数据:', blobUrl)
-    return null
-  }
-}
 
 /**
  * Normalize legacy persisted payload shapes.
@@ -245,32 +242,61 @@ function hasBlobLikeCanvasSrc(
   return typeof item.src === 'string' && item.src.startsWith('blob:')
 }
 
-async function saveBlobData(
-  db: IDBDatabase,
-  itemId: string,
-  data: ArrayBuffer,
-  mimeType: string
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(BLOB_STORE_NAME, 'readwrite')
-    const store = tx.objectStore(BLOB_STORE_NAME)
-    store.put({ data, mimeType }, itemId)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => rejectCanvasStorageError(reject, 'blob save transaction', tx.error)
-  })
+function getScopedCanvasBlobKey(storeKey: string, itemKey: string): string {
+  return `${storeKey}${BLOB_STORE_KEY_SEPARATOR}${itemKey}`
+}
+
+function getScopedCanvasBlobKeyPrefix(storeKey: string): string {
+  return `${storeKey}${BLOB_STORE_KEY_SEPARATOR}`
+}
+
+function getLogicalCanvasBlobKey(storeKey: string, storageKey: string): string | null {
+  const prefix = getScopedCanvasBlobKeyPrefix(storeKey)
+  return storageKey.startsWith(prefix) ? storageKey.slice(prefix.length) : null
+}
+
+async function resolveCanvasBinaryAssetFromSourceFile(
+  item: BlobPersistableCanvasItem,
+  key: string,
+  fileName: string,
+  fallbackMimeType: string
+): Promise<ResolvedCanvasBinaryAsset | null> {
+  const sourceFile = 'sourceFile' in item ? item.sourceFile : undefined
+  if (!sourceFile) {
+    return null
+  }
+
+  try {
+    return {
+      key,
+      data: await readBlobDataAsArrayBuffer(sourceFile),
+      mimeType: sourceFile.type || normalizeFileMimeType(fileName, undefined, fallbackMimeType),
+      fileName
+    }
+  } catch (error) {
+    console.warn('[Canvas Storage] Failed to read source file asset:', key, error)
+    return null
+  }
 }
 
 /**
  * Persist multiple blob entries in a single IndexedDB transaction.
  */
-async function saveBlobEntries(db: IDBDatabase, entries: readonly BlobWriteEntry[]): Promise<void> {
+async function saveBlobEntries(
+  db: IDBDatabase,
+  storeKey: string,
+  entries: readonly BlobWriteEntry[]
+): Promise<void> {
   if (entries.length === 0) return
 
   return new Promise((resolve, reject) => {
     const tx = db.transaction(BLOB_STORE_NAME, 'readwrite')
     const store = tx.objectStore(BLOB_STORE_NAME)
     for (const entry of entries) {
-      store.put({ data: entry.data, mimeType: entry.mimeType }, entry.key)
+      store.put(
+        { data: entry.data, mimeType: entry.mimeType },
+        getScopedCanvasBlobKey(storeKey, entry.key)
+      )
     }
     tx.oncomplete = () => resolve()
     tx.onerror = () => rejectCanvasStorageError(reject, 'blob batch save transaction', tx.error)
@@ -279,6 +305,28 @@ async function saveBlobEntries(db: IDBDatabase, entries: readonly BlobWriteEntry
 
 function cloneUint8ArrayBuffer(source: Uint8Array): ArrayBuffer {
   return source.slice().buffer
+}
+
+async function readBlobDataAsArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
+  const blobWithReaders = blob as Blob & {
+    arrayBuffer?: () => Promise<ArrayBuffer>
+  }
+  if (typeof blobWithReaders.arrayBuffer === 'function') {
+    return await blobWithReaders.arrayBuffer()
+  }
+
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(new TextEncoder().encode(reader.result).buffer)
+        return
+      }
+      resolve(reader.result as ArrayBuffer)
+    }
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read blob data.'))
+    reader.readAsArrayBuffer(blob)
+  })
 }
 
 function resolveDataUriAsset(
@@ -359,9 +407,16 @@ async function fetchSourceAsArrayBuffer(
       return null
     }
 
+    if (typeof response.blob !== 'function') {
+      return {
+        data: await response.arrayBuffer(),
+        mimeType: null
+      }
+    }
+
     const blob = await response.blob()
     return {
-      data: await blob.arrayBuffer(),
+      data: await readBlobDataAsArrayBuffer(blob),
       mimeType: blob.type || null
     }
   } catch {
@@ -369,22 +424,36 @@ async function fetchSourceAsArrayBuffer(
   }
 }
 
-async function readIndexedDbBinaryAsset(
+function readBlobStoreEntry(
+  store: IDBObjectStore,
   key: string
+): Promise<{ data: ArrayBuffer; mimeType: string } | undefined> {
+  return new Promise((resolve, reject) => {
+    const request = store.get(key)
+    request.onsuccess = () =>
+      resolve(request.result as { data: ArrayBuffer; mimeType: string } | undefined)
+    request.onerror = () =>
+      rejectCanvasStorageError(reject, `embedded asset load request for ${key}`, request.error)
+  })
+}
+
+async function readIndexedDbBinaryAsset(
+  key: string,
+  storeKey?: string
 ): Promise<{ data: ArrayBuffer; mimeType: string } | null> {
   try {
     const db = await openDB()
-    const result = await new Promise<{ data: ArrayBuffer; mimeType: string } | undefined>(
-      (resolve, reject) => {
-        const tx = db.transaction(BLOB_STORE_NAME, 'readonly')
-        const store = tx.objectStore(BLOB_STORE_NAME)
-        const request = store.get(key)
-        request.onsuccess = () =>
-          resolve(request.result as { data: ArrayBuffer; mimeType: string } | undefined)
-        request.onerror = () =>
-          rejectCanvasStorageError(reject, `embedded asset load request for ${key}`, request.error)
-      }
-    )
+    const tx = db.transaction(BLOB_STORE_NAME, 'readonly')
+    const store = tx.objectStore(BLOB_STORE_NAME)
+    const scopedResultPromise = storeKey
+      ? readBlobStoreEntry(store, getScopedCanvasBlobKey(storeKey, key))
+      : Promise.resolve(undefined)
+    const legacyResultPromise = readBlobStoreEntry(store, key)
+    const [scopedResult, legacyResult] = await Promise.all([
+      scopedResultPromise,
+      legacyResultPromise
+    ])
+    const result = scopedResult || legacyResult
     db.close()
 
     return result ? { data: result.data, mimeType: result.mimeType } : null
@@ -397,7 +466,9 @@ async function resolveCanvasBinaryAsset(
   key: string,
   sourceUrl: string | undefined,
   fileName: string,
-  fallbackMimeType: string
+  fallbackMimeType: string,
+  storeKey?: string,
+  options: { allowIndexedDbFallback?: boolean } = {}
 ): Promise<ResolvedCanvasBinaryAsset | null> {
   if (!sourceUrl) {
     return null
@@ -407,7 +478,9 @@ async function resolveCanvasBinaryAsset(
   const fromLocalFile = fromDataUri ? null : await readBinarySourceFromLocalFile(sourceUrl)
   const fromFetch = fromDataUri || fromLocalFile ? null : await fetchSourceAsArrayBuffer(sourceUrl)
   const fromIndexedDb =
-    fromDataUri || fromLocalFile || fromFetch ? null : await readIndexedDbBinaryAsset(key)
+    fromDataUri || fromLocalFile || fromFetch || !options.allowIndexedDbFallback
+      ? null
+      : await readIndexedDbBinaryAsset(key, storeKey)
   const resolved = fromDataUri || fromLocalFile || fromFetch || fromIndexedDb
 
   if (!resolved) {
@@ -452,10 +525,20 @@ async function resolveCanvasBinaryAssetForItem(
   key: string,
   sourceUrl: string | undefined,
   fileName: string,
-  fallbackMimeType: string
+  fallbackMimeType: string,
+  storeKey?: string,
+  options?: { allowIndexedDbFallback?: boolean }
 ): Promise<ResolvedCanvasBinaryAsset | null> {
   return (
-    (await resolveCanvasBinaryAsset(key, sourceUrl, fileName, fallbackMimeType)) ||
+    (await resolveCanvasBinaryAssetFromSourceFile(item, key, fileName, fallbackMimeType)) ||
+    (await resolveCanvasBinaryAsset(
+      key,
+      sourceUrl,
+      fileName,
+      fallbackMimeType,
+      storeKey,
+      options
+    )) ||
     (await resolveCanvasBinaryAssetFromComfyFileItem(item, key, fileName, fallbackMimeType))
   )
 }
@@ -683,7 +766,16 @@ async function resolveProjectStorageRootPath(): Promise<string | null> {
 
 function resolveProjectStorageDirName(storeKey: string): string {
   const project = getProjectById(storeKey)
-  return project?.storageDirName || buildProjectStorageDirName(project?.name || storeKey, storeKey)
+  const normalizedStoredDirName = project?.storageDirName
+    ? normalizeGeneratedRootDirName(project.storageDirName)
+    : ''
+  return normalizedStoredDirName || buildProjectStorageDirName(project?.name || storeKey, storeKey)
+}
+
+function resolveLegacyProjectStorageDirName(storeKey: string): string | null {
+  const currentName = resolveProjectStorageDirName(storeKey)
+  const legacyName = unprefixGeneratedRootDirName(currentName)
+  return legacyName && legacyName !== currentName ? legacyName : null
 }
 
 export async function getProjectCanvasLocation(
@@ -695,10 +787,18 @@ export async function getProjectCanvasLocation(
   }
 
   const projectRootDir = window.path.join(rootPath, resolveProjectStorageDirName(storeKey))
+  const legacyStorageDirName = resolveLegacyProjectStorageDirName(storeKey)
+  const legacyProjectRootDir = legacyStorageDirName
+    ? window.path.join(rootPath, legacyStorageDirName)
+    : undefined
   return {
     projectRootDir,
+    ...(legacyProjectRootDir ? { legacyProjectRootDir } : {}),
     canvasFilename: PROJECT_CANVAS_FILENAME,
     canvasFullPath: window.path.join(projectRootDir, PROJECT_CANVAS_FILENAME),
+    ...(legacyProjectRootDir
+      ? { legacyCanvasFullPath: window.path.join(legacyProjectRootDir, PROJECT_CANVAS_FILENAME) }
+      : {}),
     assetDir: window.path.join(projectRootDir, PROJECT_ASSET_DIRNAME)
   }
 }
@@ -877,7 +977,8 @@ async function saveProjectCanvasFile(
       groups,
       groupBranches,
       figmaBinding,
-      seededAssetEntries
+      seededAssetEntries,
+      storeKey
     )
 
     await writeProjectAssetFiles(location.assetDir, assetEntries)
@@ -924,6 +1025,7 @@ async function readCanvasItemsFromProjectFile(
 
 async function loadBlobUrlMap(
   db: IDBDatabase,
+  storeKey: string,
   itemIds: readonly string[]
 ): Promise<Map<string, string>> {
   if (itemIds.length === 0) return new Map()
@@ -935,9 +1037,17 @@ async function loadBlobUrlMap(
     uniqueItemIds.map(
       (itemId) =>
         new Promise<readonly [string, string] | null>((resolve, reject) => {
-          const request = store.get(itemId)
-          request.onsuccess = () => {
-            const result = request.result as { data: ArrayBuffer; mimeType: string } | undefined
+          const scopedRequest = store.get(getScopedCanvasBlobKey(storeKey, itemId))
+          const legacyRequest = store.get(itemId)
+          let scopedResult: { data: ArrayBuffer; mimeType: string } | undefined
+          let legacyResult: { data: ArrayBuffer; mimeType: string } | undefined
+          let completedRequests = 0
+          const finish = () => {
+            completedRequests += 1
+            if (completedRequests < 2) {
+              return
+            }
+            const result = scopedResult || legacyResult
             if (!result) {
               resolve(null)
               return
@@ -946,8 +1056,30 @@ async function loadBlobUrlMap(
             const blob = new Blob([result.data], { type: result.mimeType })
             resolve([itemId, URL.createObjectURL(blob)] as const)
           }
-          request.onerror = () =>
-            rejectCanvasStorageError(reject, `blob load request for ${itemId}`, request.error)
+          scopedRequest.onsuccess = () => {
+            scopedResult = scopedRequest.result as
+              | { data: ArrayBuffer; mimeType: string }
+              | undefined
+            finish()
+          }
+          legacyRequest.onsuccess = () => {
+            legacyResult = legacyRequest.result as
+              | { data: ArrayBuffer; mimeType: string }
+              | undefined
+            finish()
+          }
+          scopedRequest.onerror = () =>
+            rejectCanvasStorageError(
+              reject,
+              `scoped blob load request for ${itemId}`,
+              scopedRequest.error
+            )
+          legacyRequest.onerror = () =>
+            rejectCanvasStorageError(
+              reject,
+              `legacy blob load request for ${itemId}`,
+              legacyRequest.error
+            )
         })
     )
   )
@@ -1027,7 +1159,12 @@ async function loadCanvasItemsFromProjectFile(storeKey: string): Promise<CanvasS
     return null
   }
 
-  return await readCanvasItemsFromProjectFile(location.canvasFullPath)
+  return (
+    (await readCanvasItemsFromProjectFile(location.canvasFullPath)) ||
+    (location.legacyCanvasFullPath
+      ? await readCanvasItemsFromProjectFile(location.legacyCanvasFullPath)
+      : null)
+  )
 }
 
 // Guess MIME types.
@@ -1084,51 +1221,55 @@ export async function saveCanvasItems(
       await Promise.all(
         blobItems.map(async (item) => {
           const resolvedFileName = item.fileName || item.id
-          const buf =
-            (await fetchBlobAsArrayBuffer(item.src)) ||
-            (
-              await resolveCanvasBinaryAssetFromComfyFileItem(
-                item,
-                item.id,
-                resolvedFileName,
-                guessMimeType(resolvedFileName)
-              )
-            )?.data
-          if (!buf) return null
-
-          return {
-            key: item.id,
-            data: buf,
-            mimeType: guessMimeType(resolvedFileName)
-          } satisfies BlobWriteEntry
+          return await resolveCanvasBinaryAssetForItem(
+            item,
+            item.id,
+            item.src,
+            resolvedFileName,
+            guessMimeType(resolvedFileName),
+            storeKey
+          )
         })
       )
-    ).filter((entry): entry is BlobWriteEntry => entry !== null)
+    ).filter((entry): entry is ResolvedCanvasBinaryAsset => entry !== null)
 
     // 1.5 Persist blob-backed model texture data.
+    const blobTextureSources = items.flatMap((item) => {
+      if (item.type !== 'model3d' || !item.textures) return []
+      return Object.entries(item.textures)
+        .filter(([, texUrl]) => texUrl.startsWith('blob:'))
+        .map(([texName, texUrl]) => ({
+          key: getModelTextureKey(item.id, texName),
+          texName,
+          texUrl
+        }))
+    })
     const persistedTextureEntries = (
       await Promise.all(
-        items.flatMap((item) => {
-          if (item.type !== 'model3d' || !item.textures) return []
-          return Object.entries(item.textures)
-            .filter(([, texUrl]) => texUrl.startsWith('blob:'))
-            .map(async ([texName, texUrl]) => {
-              const buf = await fetchBlobAsArrayBuffer(texUrl)
-              if (!buf) return null
-
-              return {
-                key: getModelTextureKey(item.id, texName),
-                data: buf,
-                mimeType: guessTextureMimeType(texName)
-              } satisfies BlobWriteEntry
-            })
-        })
+        blobTextureSources.map(async ({ key, texName, texUrl }) =>
+          resolveCanvasBinaryAsset(key, texUrl, texName, guessTextureMimeType(texName), storeKey)
+        )
       )
-    ).filter((entry): entry is BlobWriteEntry => entry !== null)
+    ).filter((entry): entry is ResolvedCanvasBinaryAsset => entry !== null)
+
+    const persistedBlobKeys = new Set(persistedBlobEntries.map((entry) => entry.key))
+    const missingBlobItemIds = blobItems
+      .filter((item) => !persistedBlobKeys.has(item.id))
+      .map((item) => item.id)
+    const persistedTextureKeys = new Set(persistedTextureEntries.map((entry) => entry.key))
+    const missingTextureIds = blobTextureSources
+      .filter((source) => !persistedTextureKeys.has(source.key))
+      .map((source) => source.key)
+    const missingBinaryKeys = [...missingBlobItemIds, ...missingTextureIds]
+    if (missingBinaryKeys.length > 0) {
+      throw new Error(
+        `[Canvas Storage] Refusing to save canvas metadata because binary data could not be persisted: ${missingBinaryKeys.join(', ')}`
+      )
+    }
 
     const allBlobEntries = [...persistedBlobEntries, ...persistedTextureEntries]
 
-    await saveBlobEntries(db, allBlobEntries)
+    await saveBlobEntries(db, storeKey, allBlobEntries)
 
     // 2. Remove blob entries that are no longer referenced.
     const currentBlobIds = new Set<string>([
@@ -1146,13 +1287,11 @@ export async function saveCanvasItems(
       })
       for (const key of allBlobKeys) {
         const k = key as string
-        // Keep currently referenced item blobs and texture blobs.
-        if (currentBlobIds.has(k)) continue
-        // Texture keys use the format itemId::tex::texName.
-        if (k.includes('::tex::')) {
-          const parentId = k.split('::tex::')[0]
-          if (currentBlobIds.has(parentId)) continue
+        const logicalKey = getLogicalCanvasBlobKey(storeKey, k)
+        if (logicalKey === null) {
+          continue
         }
+        if (currentBlobIds.has(logicalKey)) continue
         await deleteBlobData(db, k)
       }
     } catch {
@@ -1250,10 +1389,12 @@ export async function loadCanvasItems(storeKey: string = KEY): Promise<{
     )
     const restoredItemBlobUrls = await loadBlobUrlMap(
       db,
+      storeKey,
       restorableBlobBackedItems.map((item) => item.id)
     )
     const restoredTextureUrls = await loadBlobUrlMap(
       db,
+      storeKey,
       restorableBlobBackedItems.flatMap((item) => {
         if (item.type !== 'model3d') return []
         const textures = (item as { textures?: Record<string, string> }).textures
@@ -1303,21 +1444,28 @@ export async function clearCanvasItems(storeKey: string = KEY): Promise<void> {
         rejectCanvasStorageError(reject, 'canvas metadata clear transaction', tx.error)
     })
 
-    // Clear blob data.
-    const blobTx = db.transaction(BLOB_STORE_NAME, 'readwrite')
-    const blobStore = blobTx.objectStore(BLOB_STORE_NAME)
-    blobStore.clear()
+    try {
+      const scopedBlobKeys = await new Promise<string[]>((resolve, reject) => {
+        const blobTx = db.transaction(BLOB_STORE_NAME, 'readonly')
+        const blobStore = blobTx.objectStore(BLOB_STORE_NAME)
+        const req = blobStore.getAllKeys()
+        req.onsuccess = () =>
+          resolve(
+            req.result
+              .map((key) => String(key))
+              .filter((key) => getLogicalCanvasBlobKey(storeKey, key) !== null)
+          )
+        req.onerror = () =>
+          rejectCanvasStorageError(reject, 'blob key enumeration request', req.error)
+      })
 
-    await new Promise<void>((resolve, reject) => {
-      blobTx.oncomplete = () => {
-        db.close()
-        resolve()
+      for (const key of scopedBlobKeys) {
+        await deleteBlobData(db, key)
       }
-      blobTx.onerror = () => {
-        db.close()
-        rejectCanvasStorageError(reject, 'blob clear transaction', blobTx.error)
-      }
-    })
+    } catch {
+      // getAllKeys may not be available in very old environments; keep metadata clearing intact.
+    }
+    db.close()
 
     await saveProjectCanvasFile(storeKey, [], [], [], null)
   } catch (err) {
@@ -1407,7 +1555,8 @@ function resolveCanvasAssetFileName(
 
 async function collectCanvasEmbeddedAssets(
   items: CanvasItem[],
-  excludeKeys: ReadonlySet<string> = new Set()
+  excludeKeys: ReadonlySet<string> = new Set(),
+  storeKey?: string
 ): Promise<ResolvedCanvasBinaryAsset[]> {
   const tasks: Array<Promise<ResolvedCanvasBinaryAsset | null>> = []
 
@@ -1419,11 +1568,14 @@ async function collectCanvasEmbeddedAssets(
     const resolvedFileName = resolveCanvasAssetFileName(item)
     if (!excludeKeys.has(item.id)) {
       tasks.push(
-        resolveCanvasBinaryAsset(
+        resolveCanvasBinaryAssetForItem(
+          item,
           item.id,
           item.src,
           resolvedFileName,
-          guessMimeType(resolvedFileName)
+          guessMimeType(resolvedFileName),
+          storeKey,
+          { allowIndexedDbFallback: true }
         )
       )
     }
@@ -1440,7 +1592,9 @@ async function collectCanvasEmbeddedAssets(
             textureKey,
             textureUrl,
             textureName,
-            guessTextureMimeType(textureName)
+            guessTextureMimeType(textureName),
+            storeKey,
+            { allowIndexedDbFallback: true }
           )
         )
       }
@@ -1538,7 +1692,8 @@ async function buildCanvasFileData(
   groups: CanvasGroup[] = [],
   groupBranches: CanvasGroupBranch[] = [],
   figmaBinding: CanvasFigmaBinding | null = null,
-  seededAssetEntries: readonly BlobWriteEntry[] = []
+  seededAssetEntries: readonly BlobWriteEntry[] = [],
+  storeKey?: string
 ): Promise<{
   canvasFileData: CanvasFileData
   assetEntries: ResolvedCanvasBinaryAsset[]
@@ -1558,7 +1713,8 @@ async function buildCanvasFileData(
   )
   const collectedAssets = await collectCanvasEmbeddedAssets(
     items,
-    new Set(seededAssets.map((entry) => entry.key))
+    new Set(seededAssets.map((entry) => entry.key)),
+    storeKey
   )
   const assetEntries = [...seededAssets, ...collectedAssets]
   const blobs =
@@ -1596,7 +1752,8 @@ async function buildProjectCanvasFileData(
   groups: CanvasGroup[] = [],
   groupBranches: CanvasGroupBranch[] = [],
   figmaBinding: CanvasFigmaBinding | null = null,
-  seededAssetEntries: readonly BlobWriteEntry[] = []
+  seededAssetEntries: readonly BlobWriteEntry[] = [],
+  storeKey?: string
 ): Promise<{
   canvasFileData: CanvasFileData
   assetEntries: ResolvedCanvasBinaryAsset[]
@@ -1661,7 +1818,9 @@ async function buildProjectCanvasFileData(
             sourceItem.id,
             sourceItem.src,
             croppedFileName,
-            guessMimeType(croppedFileName)
+            guessMimeType(croppedFileName),
+            storeKey,
+            { allowIndexedDbFallback: true }
           ))
 
         if (sourceAsset) {
@@ -1715,7 +1874,9 @@ async function buildProjectCanvasFileData(
               sourceItem.id,
               sourceItem.src,
               resolvedFileName,
-              guessMimeType(resolvedFileName)
+              guessMimeType(resolvedFileName),
+              storeKey,
+              { allowIndexedDbFallback: true }
             ))
 
           if (resolvedAsset) {
@@ -1763,7 +1924,9 @@ async function buildProjectCanvasFileData(
                 textureKey,
                 textureUrl,
                 textureName,
-                guessTextureMimeType(textureName)
+                guessTextureMimeType(textureName),
+                storeKey,
+                { allowIndexedDbFallback: true }
               ))
 
             if (resolvedTextureAsset) {
@@ -1950,7 +2113,7 @@ async function persistCanvasFileEmbeddedAssets(
       data: base64ToArrayBuffer(embedded.base64),
       mimeType: embedded.mimeType
     }))
-    await saveBlobEntries(db, entries)
+    await saveBlobEntries(db, KEY, entries)
     db.close()
     console.log(`[Canvas Import] Persisted ${entries.length} embedded assets to IndexedDB`)
   } catch (error) {
@@ -2039,7 +2202,14 @@ export async function exportCanvasFile(
     fileName ||
     `canvas_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}${CANVAS_FILE_EXT}`
 
-  const { canvasFileData } = await buildCanvasFileData(items, groups, groupBranches, figmaBinding)
+  const { canvasFileData } = await buildCanvasFileData(
+    items,
+    groups,
+    groupBranches,
+    figmaBinding,
+    [],
+    canvasId
+  )
   const json = JSON.stringify(canvasFileData)
   const blobCount = Object.keys(canvasFileData.blobs || {}).length
   const cachedTargetPath = getCanvasSaveTargetPath(canvasId)

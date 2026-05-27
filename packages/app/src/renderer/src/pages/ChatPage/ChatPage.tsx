@@ -156,9 +156,9 @@ import {
 import { getQAppPromptSettings } from '../QuickAppPage/QAppExecutePanel/qAppExecuteInputs/qAppPromptSettings'
 import { emitProjectTraceRuntimeEvent } from '@renderer/features/projectTrace/projectTraceRuntime'
 import {
-  resolveProjectIdFromStorageScope,
-  resolveProjectResourceDir
-} from '@renderer/utils/projectResourcePaths'
+  resolveAssistantImageAutoSaveDir,
+  resolveChatReasoningPreferenceKey
+} from './chatPageExtensions'
 
 // Hooks
 import { useImagePreview } from './hooks/useImagePreview'
@@ -191,6 +191,8 @@ type ExternalSendToAgentDetail = {
   hiddenText?: string
   attachment?: ChatAttachment
   attachments?: ChatAttachment[]
+  scope?: string
+  targetScope?: string
   autoSend?: boolean
 }
 
@@ -209,6 +211,7 @@ type ExternalConfirmationRequest = ChatPendingConfirmation & {
 }
 
 const HY3D_SIGNED_URL_REFRESH_BUFFER_MS = 5 * 60 * 1000
+const CHAT_INPUT_STATE_COMMIT_DELAY_MS = 80
 const CHAT_DRAFT_PERSIST_DELAY_MS = 200
 const CHAT_MODEL3D_EXTENSIONS = ['.glb', '.gltf', '.obj', '.fbx', '.dae', '.3ds', '.ply', '.stl']
 const STORAGE_KEY_REASONING_EFFORT = 'chat.reasoningEffort'
@@ -460,21 +463,6 @@ const normalizeReasoningPreferenceMap = (
           Boolean(entry[0]?.trim()) && Boolean(entry[1])
       )
   )
-
-const resolveReasoningPreferenceKey = (
-  profileId: string | null | undefined,
-  profile?: ChatCapabilityProfile | null
-): string | null => {
-  const baseProfileId = getBaseProfileId(profileId)
-  if (baseProfileId) {
-    return baseProfileId
-  }
-
-  const modelName = String(profile?.model_name || '')
-    .trim()
-    .toLowerCase()
-  return modelName || null
-}
 
 const dispatchReasoningEffortSync = (map: Record<string, LLMReasoningEffort>) => {
   window.dispatchEvent(
@@ -1173,6 +1161,29 @@ const ChatPage: React.FC<ChatPageProps> = ({
   const pendingAttachmentsRef = useRef<ChatAttachment[]>(pendingAttachments)
   const pendingHiddenContextRef = useRef(pendingHiddenContext)
   const pendingExternalSendToAgentRef = useRef<ExternalSendToAgentDetail[]>([])
+  const isApplyingDraftRef = useRef(false)
+  const inputValueCommitTimerRef = useRef<number | null>(null)
+  const composerDraftSessionIdRef = useRef<string | null>(currentSessionIdRef.current)
+  const composerDraftMutationRef = useRef<{ sessionId: string | null; updatedAt: number }>({
+    sessionId: currentSessionIdRef.current,
+    updatedAt: 0
+  })
+
+  const markComposerDraftMutated = useCallback(() => {
+    if (isApplyingDraftRef.current) return
+    composerDraftSessionIdRef.current = currentSessionIdRef.current
+    composerDraftMutationRef.current = {
+      sessionId: currentSessionIdRef.current,
+      updatedAt: Date.now()
+    }
+  }, [])
+
+  const clearScheduledInputValueCommit = useCallback(() => {
+    if (inputValueCommitTimerRef.current != null) {
+      window.clearTimeout(inputValueCommitTimerRef.current)
+      inputValueCommitTimerRef.current = null
+    }
+  }, [])
 
   const mergeHiddenContext = useCallback(
     (currentValue: string, ...nextValues: Array<string | undefined>) => {
@@ -1194,32 +1205,64 @@ const ChatPage: React.FC<ChatPageProps> = ({
     []
   )
 
-  const setInputValue = useCallback<React.Dispatch<React.SetStateAction<string>>>((value) => {
-    setInputValueState((prev) => {
-      const next = typeof value === 'function' ? value(prev) : value
+  const setInputValue = useCallback<React.Dispatch<React.SetStateAction<string>>>(
+    (value) => {
+      clearScheduledInputValueCommit()
+      const previous = inputValueRef.current
+      const next = typeof value === 'function' ? value(previous) : value
       inputValueRef.current = next
-      return next
-    })
-  }, [])
+      if (next !== previous) {
+        markComposerDraftMutated()
+      }
+      setInputValueState((prev) => (prev === next ? prev : next))
+    },
+    [clearScheduledInputValueCommit, markComposerDraftMutated]
+  )
+
+  const handleComposerInputChange = useCallback(
+    (nextValue: string) => {
+      const previous = inputValueRef.current
+      inputValueRef.current = nextValue
+      if (nextValue !== previous) {
+        markComposerDraftMutated()
+      }
+
+      clearScheduledInputValueCommit()
+      inputValueCommitTimerRef.current = window.setTimeout(() => {
+        inputValueCommitTimerRef.current = null
+        const latestValue = inputValueRef.current
+        setInputValueState((prev) => (prev === latestValue ? prev : latestValue))
+      }, CHAT_INPUT_STATE_COMMIT_DELAY_MS)
+    },
+    [clearScheduledInputValueCommit, markComposerDraftMutated]
+  )
+
+  useEffect(() => clearScheduledInputValueCommit, [clearScheduledInputValueCommit])
   const setPendingAttachments = useCallback<React.Dispatch<React.SetStateAction<ChatAttachment[]>>>(
     (value) => {
       setPendingAttachmentsState((prev) => {
         const next = typeof value === 'function' ? value(prev) : value
         pendingAttachmentsRef.current = next
+        if (next !== prev) {
+          markComposerDraftMutated()
+        }
         return next
       })
     },
-    []
+    [markComposerDraftMutated]
   )
   const setPendingHiddenContext = useCallback<React.Dispatch<React.SetStateAction<string>>>(
     (value) => {
       setPendingHiddenContextState((prev) => {
         const next = typeof value === 'function' ? value(prev) : value
         pendingHiddenContextRef.current = next
+        if (next !== prev) {
+          markComposerDraftMutated()
+        }
         return next
       })
     },
-    []
+    [markComposerDraftMutated]
   )
 
   const applyExternalSendToAgentInput = useCallback(
@@ -1290,28 +1333,49 @@ const ChatPage: React.FC<ChatPageProps> = ({
   const applyDraftToComposerState = useCallback(
     (draft?: ChatSessionDraft | null) => {
       const normalizedDraft = cloneChatSessionDraft(normalizeChatSessionDraft(draft))
+      const targetSessionId = currentSessionIdRef.current
+      const localMutation = composerDraftMutationRef.current
+      if (
+        composerDraftSessionIdRef.current === targetSessionId &&
+        localMutation.sessionId === targetSessionId &&
+        localMutation.updatedAt > (normalizedDraft?.updatedAt ?? 0)
+      ) {
+        return
+      }
+
       const nextInputValue = normalizedDraft?.inputValue ?? ''
       const nextPendingAttachments = normalizedDraft?.pendingAttachments ?? []
       const nextPendingHiddenContext = normalizedDraft?.pendingHiddenContext ?? ''
 
-      if (inputValueRef.current !== nextInputValue) {
-        inputValueRef.current = nextInputValue
-        setInputValue(nextInputValue)
+      isApplyingDraftRef.current = true
+      try {
+        if (inputValueRef.current !== nextInputValue) {
+          inputValueRef.current = nextInputValue
+          setInputValue(nextInputValue)
+        }
+
+        const currentDraft = normalizeChatSessionDraft({
+          inputValue: inputValueRef.current,
+          pendingAttachments: pendingAttachmentsRef.current,
+          pendingHiddenContext: pendingHiddenContextRef.current,
+          updatedAt: normalizedDraft?.updatedAt ?? 0
+        })
+
+        if (!areChatSessionDraftsEqual(currentDraft, normalizedDraft)) {
+          pendingAttachmentsRef.current = nextPendingAttachments
+          pendingHiddenContextRef.current = nextPendingHiddenContext
+          setPendingAttachments(nextPendingAttachments)
+          setPendingHiddenContext(nextPendingHiddenContext)
+        }
+      } finally {
+        isApplyingDraftRef.current = false
       }
 
-      const currentDraft = normalizeChatSessionDraft({
-        inputValue: inputValueRef.current,
-        pendingAttachments: pendingAttachmentsRef.current,
-        pendingHiddenContext: pendingHiddenContextRef.current,
+      composerDraftMutationRef.current = {
+        sessionId: targetSessionId,
         updatedAt: normalizedDraft?.updatedAt ?? 0
-      })
-
-      if (!areChatSessionDraftsEqual(currentDraft, normalizedDraft)) {
-        pendingAttachmentsRef.current = nextPendingAttachments
-        pendingHiddenContextRef.current = nextPendingHiddenContext
-        setPendingAttachments(nextPendingAttachments)
-        setPendingHiddenContext(nextPendingHiddenContext)
       }
+      composerDraftSessionIdRef.current = targetSessionId
     },
     [setInputValue, setPendingAttachments, setPendingHiddenContext]
   )
@@ -1323,6 +1387,19 @@ const ChatPage: React.FC<ChatPageProps> = ({
       }
 
       const normalizedSnapshot = normalizeChatSessionDraft(snapshot)
+      const isStaleCurrentComposerSnapshot = (updatedAt = 0): boolean => {
+        const localMutation = composerDraftMutationRef.current
+        return (
+          sessionId === currentSessionIdRef.current &&
+          localMutation.sessionId === sessionId &&
+          localMutation.updatedAt > updatedAt
+        )
+      }
+
+      if (isStaleCurrentComposerSnapshot(normalizedSnapshot?.updatedAt ?? 0)) {
+        return
+      }
+
       const initialSessions = sessionsRef.current
       const initialSessionIndex = initialSessions.findIndex((session) => session.id === sessionId)
       if (initialSessionIndex < 0) {
@@ -1352,6 +1429,14 @@ const ChatPage: React.FC<ChatPageProps> = ({
             )
           })
         : undefined
+      if (
+        isStaleCurrentComposerSnapshot(
+          persistedDraft?.updatedAt ?? normalizedSnapshot?.updatedAt ?? 0
+        )
+      ) {
+        return
+      }
+
       writeSessionDraftBackup(
         sessionId,
         persistedDraft?.updatedAt ?? normalizedSnapshot?.updatedAt ?? Date.now(),
@@ -1795,7 +1880,11 @@ const ChatPage: React.FC<ChatPageProps> = ({
         }>
       ).detail
 
-      if (detail?.scope && detail.scope !== storageScope) return
+      if (detail?.scope) {
+        if (detail.scope !== storageScope) return
+      } else if (!active) {
+        return
+      }
       const sessionId = detail?.sessionId
       if (!sessionId) return
 
@@ -1824,7 +1913,7 @@ const ChatPage: React.FC<ChatPageProps> = ({
 
     window.addEventListener('chat:session-terminated', handleSessionTerminated)
     return () => window.removeEventListener('chat:session-terminated', handleSessionTerminated)
-  }, [emitPreviewRefresh, pendingExternalConfirmations, storageScope])
+  }, [active, emitPreviewRefresh, pendingExternalConfirmations, storageScope])
   useEffect(() => {
     if (!sessionsLoaded) {
       return
@@ -1870,7 +1959,7 @@ const ChatPage: React.FC<ChatPageProps> = ({
     [selectedCapabilityProfile]
   )
   const selectedReasoningProfileKey = useMemo(
-    () => resolveReasoningPreferenceKey(selectedProfileId, selectedCapabilityProfile),
+    () => resolveChatReasoningPreferenceKey(selectedProfileId, selectedCapabilityProfile),
     [selectedCapabilityProfile, selectedProfileId]
   )
   const selectedReasoningEffort = useMemo(() => {
@@ -2165,84 +2254,28 @@ const ChatPage: React.FC<ChatPageProps> = ({
         hiddenText?: string
         attachment?: ChatAttachment
         attachments?: ChatAttachment[]
+        scope?: string
         targetScope?: string
         autoSend?: boolean
       }>
       const detail = customEvent.detail
-      if (detail.targetScope !== storageScope) return
+      const targetScope = detail.targetScope ?? detail.scope
+      if (targetScope) {
+        if (targetScope !== storageScope) return
+      } else if (!active) {
+        return
+      }
       if (!sessionsLoaded) {
-        pendingExternalSendToAgentRef.current.push({
-          image: detail.image,
-          text: detail.text,
-          hiddenText: detail.hiddenText,
-          attachment: detail.attachment,
-          attachments: detail.attachments,
-          autoSend: detail.autoSend
-        })
+        pendingExternalSendToAgentRef.current.push(detail)
         return
       }
 
-      // autoSend 模式：立即发送到 agent 线程
-      if (detail.autoSend && sendMessageRef.current) {
-        const sendAttachments =
-          detail.attachments && detail.attachments.length > 0 ? detail.attachments : undefined
-        void sendMessageRef.current({
-          content: detail.text || '',
-          attachments: sendAttachments,
-          hiddenContext: detail.hiddenText
-        })
-        return
-      }
-
-      if (detail.attachment?.url) {
-        setPendingAttachments((prev) => {
-          if (prev.some((item) => item.url === detail.attachment?.url)) return prev
-          return [...prev, detail.attachment as ChatAttachment]
-        })
-      }
-
-      if (detail.image) {
-        fetch(detail.image)
-          .then((res) => res.blob())
-          .then(async (blob) => {
-            const attachment = await buildImageChatAttachmentFromFile(
-              new File([blob], getDownloadFileNameFromUrl(detail.image as string, 'image.png'), {
-                type: blob.type || 'image/png'
-              }),
-              detail.image as string
-            )
-            setPendingAttachments((prev) => {
-              if (prev.some((a) => a.url === detail.image)) return prev
-              return [...prev, attachment]
-            })
-          })
-          .catch((err) => console.error('[ChatPage] Failed to parse canvas image:', err))
-      }
-
-      const txt = detail.text
-      if (txt) {
-        setInputValue((prev) => {
-          const base = prev.trim()
-          return base ? `${base}\n\n${txt}` : txt
-        })
-      }
-
-      if (detail.hiddenText) {
-        setPendingHiddenContext((prev) => mergeHiddenContext(prev, detail.hiddenText))
-      }
+      applyExternalSendToAgentInput(detail)
     }
 
     window.addEventListener('send-to-agent', handleSendToAgent)
     return () => window.removeEventListener('send-to-agent', handleSendToAgent)
-  }, [
-    acceptExternalInput,
-    mergeHiddenContext,
-    sessionsLoaded,
-    setInputValue,
-    setPendingAttachments,
-    setPendingHiddenContext,
-    storageScope
-  ])
+  }, [acceptExternalInput, active, applyExternalSendToAgentInput, sessionsLoaded, storageScope])
 
   useEffect(() => {
     const handleFocusComposer = (event: Event) => {
@@ -2300,10 +2333,9 @@ const ChatPage: React.FC<ChatPageProps> = ({
                 recordAutoSavedChatImageKey(trackerKey)
 
                 try {
-                  const targetDir = resolveProjectResourceDir({
+                  const targetDir = resolveAssistantImageAutoSaveDir({
                     config: { download_dir: config.download_dir },
-                    projectId: resolveProjectIdFromStorageScope(storageScope),
-                    segments: ['AutoSave', 'Agent']
+                    storageScope
                   })
                   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
                   const fileName = `agent_auto_${timestamp}.png`
@@ -3117,7 +3149,11 @@ const ChatPage: React.FC<ChatPageProps> = ({
   useEffect(() => {
     const handleTerminateScope = (event: Event): void => {
       const customEvent = event as CustomEvent<{ scope?: string }>
-      if (customEvent.detail?.scope && customEvent.detail.scope !== storageScope) return
+      if (customEvent.detail?.scope) {
+        if (customEvent.detail.scope !== storageScope) return
+      } else if (!active) {
+        return
+      }
 
       const sessionIds = new Set<string>([
         ...loadingSessionIdsRef.current,
@@ -3129,7 +3165,11 @@ const ChatPage: React.FC<ChatPageProps> = ({
     }
     const handleTerminateSession = (event: Event): void => {
       const customEvent = event as CustomEvent<{ scope?: string; sessionId?: string }>
-      if (customEvent.detail?.scope && customEvent.detail.scope !== storageScope) return
+      if (customEvent.detail?.scope) {
+        if (customEvent.detail.scope !== storageScope) return
+      } else if (!active) {
+        return
+      }
       const sessionId = customEvent.detail?.sessionId
       if (!sessionId) return
 
@@ -3142,7 +3182,7 @@ const ChatPage: React.FC<ChatPageProps> = ({
       window.removeEventListener('chat:terminate-scope', handleTerminateScope)
       window.removeEventListener('chat:terminate-session', handleTerminateSession)
     }
-  }, [storageScope, terminateSession])
+  }, [active, storageScope, terminateSession])
 
   useEffect(() => {
     const handleAppendMessage = (event: Event) => {
@@ -3284,7 +3324,11 @@ const ChatPage: React.FC<ChatPageProps> = ({
 
     const handleScopeReadyPing = (event: Event) => {
       const customEvent = event as CustomEvent<{ scope?: string; requestId?: string }>
-      if (customEvent.detail?.scope && customEvent.detail.scope !== storageScope) return
+      if (customEvent.detail?.scope) {
+        if (customEvent.detail.scope !== storageScope) return
+      } else if (!active) {
+        return
+      }
       emitScopeReady(customEvent.detail?.requestId)
     }
 
@@ -3297,7 +3341,7 @@ const ChatPage: React.FC<ChatPageProps> = ({
       window.clearTimeout(timerId)
       window.removeEventListener('chat:ping-scope-ready', handleScopeReadyPing)
     }
-  }, [acceptExternalInput, storageScope])
+  }, [acceptExternalInput, active, storageScope])
 
   const deleteSession = (sessionId: string) => {
     terminateSession(sessionId)
@@ -3553,12 +3597,14 @@ const ChatPage: React.FC<ChatPageProps> = ({
         }
       }
 
-      const activeProfile =
-        activeSkill && profileId
-          ? availableProfiles.find((profile) => profile.id === profileId) ||
-            availableProfiles.find((profile) => profile.id === getBaseProfileId(profileId)) ||
-            null
-          : null
+      const baseProfileId = getBaseProfileId(profileId)
+      const activeProfile = profileId
+        ? availableProfiles.find((profile) => profile.id === profileId) ||
+          availableProfiles.find((profile) => profile.id === baseProfileId) ||
+          null
+        : null
+      const responseModelName =
+        (activeProfile?.model_name || baseProfileId || '').trim() || undefined
       const skillAttachmentSupport =
         activeSkill && activeProfile
           ? inspectSkillAttachmentSupport(rawAttachments, activeProfile)
@@ -3570,7 +3616,7 @@ const ChatPage: React.FC<ChatPageProps> = ({
         notifyWarning(
           buildSkillAttachmentUnsupportedMessage({
             skillName: activeSkill?.skillName,
-            profileName: activeProfile?.model_name || getBaseProfileId(profileId),
+            profileName: activeProfile?.model_name || baseProfileId,
             supportsImages: skillAttachmentSupport.supportsImages,
             supportsDocuments: skillAttachmentSupport.supportsDocuments,
             unsupportedImages: skillAttachmentSupport.unsupportedImages,
@@ -3673,7 +3719,11 @@ const ChatPage: React.FC<ChatPageProps> = ({
       }
 
       const placeholderUpdater = withLatestContextCompression((prev: ChatSession[]) =>
-        appendAssistantPlaceholderToSession(prev, targetSessionId)
+        appendAssistantPlaceholderToSession(
+          prev,
+          targetSessionId,
+          explicitToolCommand ? undefined : responseModelName
+        )
       )
       setSessions(placeholderUpdater)
       updateLoadingStatus(
@@ -4086,7 +4136,7 @@ const ChatPage: React.FC<ChatPageProps> = ({
                   attachments: singleResult.result.attachments,
                   ocrResult: singleResult.result.ocrResult
                 },
-                undefined,
+                responseModelName,
                 {
                   skillId: activeSkillRuntime.skill?.id
                 }
@@ -4124,7 +4174,7 @@ const ChatPage: React.FC<ChatPageProps> = ({
                         content: responseContent
                       })
                     },
-                    undefined,
+                    responseModelName,
                     {
                       skillId: activeSkillRuntime.skill?.id
                     }
@@ -4183,7 +4233,7 @@ const ChatPage: React.FC<ChatPageProps> = ({
                   attachments: result.attachments,
                   ocrResult: result.ocrResult
                 },
-                undefined,
+                responseModelName,
                 {
                   skillId: activeSkillRuntime.skill?.id
                 }
@@ -4230,7 +4280,8 @@ const ChatPage: React.FC<ChatPageProps> = ({
                   role: 'assistant',
                   content: streamedResponse,
                   ...(streamedAttachments.length > 0 ? { attachments: streamedAttachments } : {}),
-                  ...(streamedOcrResult ? { ocrResult: streamedOcrResult } : {})
+                  ...(streamedOcrResult ? { ocrResult: streamedOcrResult } : {}),
+                  ...(responseModelName ? { modelName: responseModelName } : {})
                 },
                 sessionUrl: executionContext.shouldPersistSessionUrl ? streamedSessionUrl : null
               })
@@ -4865,7 +4916,7 @@ const ChatPage: React.FC<ChatPageProps> = ({
               <ChatComposer
                 active={active}
                 inputValue={inputValue}
-                onInputChange={setInputValue}
+                onInputChange={handleComposerInputChange}
                 onSend={handleSendCurrentMessage}
                 onUploadFile={handleUploadFile}
                 pendingAttachments={composerPendingAttachments}
@@ -4876,6 +4927,7 @@ const ChatPage: React.FC<ChatPageProps> = ({
                 disabled={!currentSession}
                 composerInputRef={composerInputRef}
                 onPreviewImage={imagePreview.setPreviewImage}
+                inputSyncKey={currentSessionId || 'no-session'}
                 selectedSkillName={
                   selectedCustomSkill ? getCustomSkillName(selectedCustomSkill) : undefined
                 }

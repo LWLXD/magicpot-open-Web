@@ -2,31 +2,54 @@ import { describe, expect, it } from 'vitest'
 import { convertGuiWorkflowToPrompt } from './guiWorkflowToPrompt'
 
 describe('convertGuiWorkflowToPrompt', () => {
-  it('omits frontend-only note nodes from the backend prompt', () => {
-    const prompt = convertGuiWorkflowToPrompt({
+  it('does not carry Note nodes from GUI workflow exports into executable prompts', () => {
+    const workflow = convertGuiWorkflowToPrompt({
       nodes: [
+        {
+          id: 1,
+          type: 'LoadImage',
+          title: 'Load Image',
+          inputs: [],
+          outputs: [],
+          widgets_values: ['input.png'],
+          properties: {
+            widget_ue_connectable: {
+              image: {}
+            }
+          }
+        },
         {
           id: 18,
           type: 'Note',
-          title: 'Note',
-          widgets_values: ['Helpful canvas-only comment']
+          inputs: [],
+          outputs: [],
+          widgets_values: ['Enable to upscale alpha/mask channel along with RGB channel.']
         },
         {
-          id: 15,
+          id: 5,
           type: 'SaveImage',
           title: 'Save Image',
-          inputs: [{ name: 'filename_prefix', widget: { name: 'filename_prefix' } }],
-          widgets_values: ['ComfyUI']
+          inputs: [{ name: 'images', link: 1 }],
+          outputs: []
         }
       ],
-      links: []
+      links: [[1, 1, 0, 5, 0, 'IMAGE']]
     })
 
-    expect(prompt).toEqual({
-      '15': {
+    expect(workflow).toEqual({
+      '1': {
+        class_type: 'LoadImage',
+        inputs: {
+          image: 'input.png'
+        },
+        _meta: {
+          title: 'Load Image'
+        }
+      },
+      '5': {
         class_type: 'SaveImage',
         inputs: {
-          filename_prefix: 'ComfyUI'
+          images: ['1', 0]
         },
         _meta: {
           title: 'Save Image'

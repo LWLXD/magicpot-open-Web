@@ -457,7 +457,7 @@ describe('requestChatCompletion', () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (
         url ===
-        'local-media:///C:/client-user-data/renderer-state/project-canvas/Canvas-Project__canvas-1/assets/images/sprite.png'
+        'local-media:///C:/client-user-data/renderer-state/project-canvas/.Canvas-Project__canvas-1/assets/images/sprite.png'
       ) {
         return {
           ok: true,
@@ -487,7 +487,7 @@ describe('requestChatCompletion', () => {
             attachments: [
               {
                 type: 'image',
-                url: 'local-media:///C:/client-user-data/renderer-state/project-canvas/Canvas-Project__canvas-1/assets/images/sprite.png',
+                url: 'local-media:///C:/client-user-data/renderer-state/project-canvas/.Canvas-Project__canvas-1/assets/images/sprite.png',
                 fileName: 'sprite.png',
                 mimeType: 'image/png'
               }
@@ -618,7 +618,7 @@ describe('requestChatCompletion', () => {
       text: async () =>
         JSON.stringify({
           error:
-            'Unauthorized LLM proxy request. Provide Authorization: Bearer <token> or X-MagicPot-Proxy-Token.'
+            'Unauthorized LLM proxy request. Provide Authorization: Bearer <token>, X-MagicPot-Proxy-Token, or legacy X-MagicPot-Bot-Secret/X-Bot-Secret.'
         })
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -731,6 +731,117 @@ describe('requestChatCompletion', () => {
       sessionUrl: undefined,
       conversationId: undefined,
       isEdit: undefined
+    })
+  })
+
+  it('forces image output mode to return only image attachments', async () => {
+    const config = createConfig()
+    config.use_remote_llm = false
+
+    const chat = vi.fn().mockResolvedValue({
+      content: 'Here is the generated image.',
+      attachments: [
+        {
+          type: 'image',
+          url: 'https://cdn.example.com/result.png',
+          fileName: 'result.png'
+        },
+        {
+          type: 'video',
+          url: 'https://cdn.example.com/result.mp4',
+          fileName: 'result.mp4'
+        }
+      ]
+    })
+    ;(window as typeof window & { api: unknown }).api = {
+      svcLLMProxy: { chat }
+    } as unknown as Window['api']
+
+    await expect(
+      requestChatCompletion({
+        config,
+        messages,
+        skillRuntime: {
+          skillId: 'image-skill',
+          execution: {
+            outputMode: 'image'
+          }
+        }
+      })
+    ).resolves.toEqual({
+      content: '',
+      sessionUrl: undefined,
+      attachments: [
+        {
+          type: 'image',
+          url: 'https://cdn.example.com/result.png',
+          fileName: 'result.png',
+          mimeType: 'image/png'
+        }
+      ]
+    })
+
+    expect(chat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        imageGenerationOptions: expect.objectContaining({ enabled: true })
+      })
+    )
+  })
+
+  it('rejects forced media output when the model returns only text', async () => {
+    const config = createConfig()
+    config.use_remote_llm = false
+
+    const chat = vi.fn().mockResolvedValue({ content: 'I cannot make a video.' })
+    ;(window as typeof window & { api: unknown }).api = {
+      svcLLMProxy: { chat }
+    } as unknown as Window['api']
+
+    await expect(
+      requestChatCompletion({
+        config,
+        messages,
+        skillRuntime: {
+          skillId: 'video-skill',
+          execution: {
+            outputMode: 'video'
+          }
+        }
+      })
+    ).rejects.toThrow('该模型不支持该输出方式')
+  })
+
+  it('strips generated media when forced text output has usable text', async () => {
+    const config = createConfig()
+    config.use_remote_llm = false
+
+    const chat = vi.fn().mockResolvedValue({
+      content: 'caption text\n![generated](https://cdn.example.com/result.png)',
+      attachments: [
+        {
+          type: 'image',
+          url: 'https://cdn.example.com/result.png'
+        }
+      ]
+    })
+    ;(window as typeof window & { api: unknown }).api = {
+      svcLLMProxy: { chat }
+    } as unknown as Window['api']
+
+    await expect(
+      requestChatCompletion({
+        config,
+        messages,
+        skillRuntime: {
+          skillId: 'text-skill',
+          execution: {
+            outputMode: 'text'
+          }
+        }
+      })
+    ).resolves.toEqual({
+      content: 'caption text',
+      sessionUrl: undefined
     })
   })
 

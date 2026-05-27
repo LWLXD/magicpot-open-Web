@@ -1,5 +1,5 @@
 import { ObjectInfo, ObjectInfoMap, Workflow, WorkflowInputValue, WorkflowNode } from './types'
-import { isComfyUIBuiltinNode } from './funcs'
+import { isComfyUIBuiltinNode, normalizeExecutableWorkflow } from './funcs'
 
 export type GuiNode = {
   id: number
@@ -308,5 +308,5 @@ export function convertGuiWorkflowToPrompt(
     workflow[nodeId] = wfNode
   }
 
-  return workflow
+  return normalizeExecutableWorkflow(workflow)
 }

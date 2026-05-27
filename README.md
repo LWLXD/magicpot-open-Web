@@ -1,6 +1,6 @@
 # MagicPot
 
-magicpot-open 的 Web 修改版，包含公司内网 Web 工作台、账号登录和管理后台等扩展。
+MagicPot 原项目的 Web 服务器版本，包含公司内网 Web 工作台、账号登录、管理后台和远程 ComfyUI 调用等扩展。
 
 MagicPot 是一个基于 Electron 的 AI 工作台。它把 AI 对话、ComfyUI 工作流、快应用、参考画布、模型文件管理、MCP/LLM 配置和运行日志放在同一个桌面客户端中，面向本地 AI 创作与自动化工作流开发。
 

@@ -14,6 +14,7 @@ import type {
   LLMProvider,
   LLMProviderOption
 } from '@shared/config/config'
+import { sharedHostExtensionApiV1 } from '@shared/extensions/generatedRegistry'
 import { LLMCli } from './types'
 import { OpenAIAPICli, GeminiAPICli, ClaudeAPICli, OllamaAPICli, type FetchImpl } from './clients'
 
@@ -43,6 +44,13 @@ const normalizeCallType = (callType?: string): LLMProfileCallType | undefined =>
 }
 
 export const resolveProfileCallType = (profile: ProfileLike): LLMProfileCallType => {
+  for (const extension of sharedHostExtensionApiV1.llmProfiles) {
+    const resolved = extension.resolveProfileCallType?.(profile)
+    if (resolved) {
+      return resolved
+    }
+  }
+
   const explicitCallType = normalizeCallType(profile.call_type)
   if (explicitCallType) {
     return explicitCallType
@@ -97,12 +105,43 @@ const normalizeModelUse = (modelUse?: string): LLMModelUse | undefined => {
   }
 }
 
+const getBaseUrlHostname = (value: string): string | null => {
+  const normalized = value.trim().toLowerCase()
+  if (!normalized) return null
+
+  const parseHostname = (candidate: string): string | null => {
+    try {
+      return new URL(candidate).hostname.toLowerCase()
+    } catch {
+      return null
+    }
+  }
+
+  return (
+    parseHostname(normalized) ||
+    (/^[a-z][a-z0-9+.-]*:\/\//i.test(normalized) ? null : parseHostname(`https://${normalized}`))
+  )
+}
+
+const hostnameMatchesDomain = (hostname: string, domain: string): boolean =>
+  hostname === domain || hostname.endsWith(`.${domain}`)
+
 export const isGeminiUrl = (url: string): boolean => {
-  return url.includes('generativelanguage.googleapis.com') || url.includes('googleapis.com')
+  const hostname = getBaseUrlHostname(url)
+  return Boolean(
+    hostname &&
+    (hostnameMatchesDomain(hostname, 'generativelanguage.googleapis.com') ||
+      hostnameMatchesDomain(hostname, 'googleapis.com'))
+  )
 }
 
 export const isClaudeUrl = (url: string): boolean => {
-  return url.includes('anthropic.com') || url.includes('claude')
+  const hostname = getBaseUrlHostname(url)
+  return Boolean(
+    hostname &&
+    (hostnameMatchesDomain(hostname, 'anthropic.com') ||
+      hostnameMatchesDomain(hostname, 'claude.ai'))
+  )
 }
 
 export const isOllamaUrl = (url: string): boolean => {
@@ -160,6 +199,13 @@ export const resolveProfileProvider = (profile: ProfileLike): LLMProvider | unde
     return undefined
   }
 
+  for (const extension of sharedHostExtensionApiV1.llmProfiles) {
+    const resolved = extension.resolveProfileProvider?.(profile)
+    if (resolved) {
+      return resolved
+    }
+  }
+
   const explicitProvider = normalizeProvider(profile.provider)
   if (explicitProvider) {
     return explicitProvider
@@ -189,6 +235,13 @@ export const resolveProfileDeployment = (profile: ProfileLike): LLMDeployment =>
     return 'local'
   }
 
+  for (const extension of sharedHostExtensionApiV1.llmProfiles) {
+    const resolved = extension.resolveProfileDeployment?.(profile)
+    if (resolved) {
+      return resolved
+    }
+  }
+
   const explicitDeployment = normalizeDeployment(profile.deployment)
   if (explicitDeployment) {
     return explicitDeployment
@@ -206,6 +259,13 @@ export const resolveProfileDeployment = (profile: ProfileLike): LLMDeployment =>
 }
 
 export const resolveProfileModelUse = (profile: ProfileLike): LLMModelUse => {
+  for (const extension of sharedHostExtensionApiV1.llmProfiles) {
+    const resolved = extension.resolveProfileModelUse?.(profile)
+    if (resolved) {
+      return resolved
+    }
+  }
+
   const explicitModelUse = normalizeModelUse(profile.model_use)
   if (explicitModelUse) {
     return explicitModelUse
@@ -226,6 +286,13 @@ export const isOllamaProfile = (profile: ProfileLike): boolean =>
   resolveProfileProvider(profile) === 'ollama'
 
 export const isRunnableProfile = (profile: ProfileLike): boolean => {
+  for (const extension of sharedHostExtensionApiV1.llmProfiles) {
+    const resolved = extension.isRunnableProfile?.(profile)
+    if (typeof resolved === 'boolean') {
+      return resolved
+    }
+  }
+
   if (resolveProfileCallType(profile) === 'local') {
     return false
   }
@@ -261,6 +328,7 @@ export const cliFromProfile = (
     api_key: string
     auth_mode?: string
     base_url: string
+    codex_fast_mode?: boolean
     model_name: string
     provider?: LLMProviderOption
     deployment?: LLMDeployment
@@ -270,6 +338,13 @@ export const cliFromProfile = (
 ): LLMCli | undefined => {
   if (!isRunnableProfile(profile)) {
     return undefined
+  }
+
+  for (const extension of sharedHostExtensionApiV1.llmProfiles) {
+    const cli = extension.createCli?.(profile, options)
+    if (cli) {
+      return cli
+    }
   }
 
   switch (resolveProfileProvider(profile)) {

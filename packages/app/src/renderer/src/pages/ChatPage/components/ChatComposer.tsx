@@ -1,4 +1,11 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import React, {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState
+} from 'react'
 import {
   Box,
   TextField,
@@ -13,6 +20,7 @@ import {
   Menu,
   MenuItem
 } from '@mui/material'
+import type { InputBaseComponentProps } from '@mui/material/InputBase'
 import {
   Send as SendIcon,
   Add as AddIcon,
@@ -59,6 +67,7 @@ interface ChatComposerProps {
   disabled: boolean
   composerInputRef: React.RefObject<HTMLTextAreaElement | HTMLInputElement | null>
   onPreviewImage: (url: string) => void
+  inputSyncKey?: string
   selectedSkillName?: string
   onClearSkill?: () => void
   addMenuSlot?: (closeMenu: () => void) => React.ReactNode
@@ -97,6 +106,60 @@ const COMPOSER_VERTICAL_OVERHEAD = 140
 const MIN_ATTACHMENT_PREVIEW_HEIGHT = 88
 const MAX_ATTACHMENT_PREVIEW_HEIGHT = 240
 const ATTACHMENT_PREVIEW_HEIGHT_RATIO = 0.32
+
+const parseCssPixelValue = (value: unknown): number | null => {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  if (typeof value !== 'string') return null
+
+  const parsed = Number.parseFloat(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const StableNativeTextarea = React.forwardRef<HTMLTextAreaElement, InputBaseComponentProps>(
+  function StableNativeTextarea(props, forwardedRef) {
+    const { ownerState: _ownerState, style, value, defaultValue, onInput, rows, ...rest } = props
+    const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+
+    useImperativeHandle(forwardedRef, () => textareaRef.current as HTMLTextAreaElement)
+
+    const resizeTextarea = useCallback(() => {
+      const textarea = textareaRef.current
+      if (!textarea) return
+
+      const resolvedStyle = style as React.CSSProperties | undefined
+      const minHeight = parseCssPixelValue(resolvedStyle?.minHeight) ?? MIN_TEXTAREA_HEIGHT
+      const maxHeight = parseCssPixelValue(resolvedStyle?.maxHeight)
+
+      textarea.style.height = 'auto'
+      const nextHeight =
+        maxHeight == null
+          ? Math.max(minHeight, textarea.scrollHeight)
+          : Math.max(minHeight, Math.min(textarea.scrollHeight, maxHeight))
+      textarea.style.height = `${nextHeight}px`
+    }, [style])
+
+    useLayoutEffect(() => {
+      resizeTextarea()
+    }, [resizeTextarea, value, defaultValue])
+
+    const handleInput = (event: React.FormEvent<HTMLTextAreaElement>) => {
+      resizeTextarea()
+      ;(onInput as React.FormEventHandler<HTMLTextAreaElement> | undefined)?.(event)
+    }
+
+    return (
+      <textarea
+        {...(rest as React.TextareaHTMLAttributes<HTMLTextAreaElement>)}
+        ref={textareaRef}
+        rows={typeof rows === 'number' ? rows : 1}
+        value={value as string | number | readonly string[] | undefined}
+        defaultValue={defaultValue as string | number | readonly string[] | undefined}
+        onInput={handleInput}
+        style={style as React.CSSProperties | undefined}
+      />
+    )
+  }
+)
 
 type InputSelectionSnapshot = {
   value: string
@@ -239,6 +302,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
   disabled,
   composerInputRef,
   onPreviewImage,
+  inputSyncKey,
   selectedSkillName,
   onClearSkill,
   addMenuSlot,
@@ -255,10 +319,12 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
 
   const composerRootRef = useRef<HTMLDivElement | null>(null)
   const committedInputValueRef = useRef(inputValue)
+  const lastInputSyncRef = useRef({ key: inputSyncKey, value: inputValue })
   const isComposingInputRef = useRef(false)
   const latestInputSelectionRef = useRef<InputSelectionSnapshot | null>(null)
   const pendingInputSelectionRef = useRef<InputSelectionSnapshot | null>(null)
   const beforeInputSelectionRef = useRef<InputSelectionSnapshot | null>(null)
+  const [localInputValue, setLocalInputValue] = useState(inputValue)
   const [addMenuAnchorEl, setAddMenuAnchorEl] = useState<HTMLElement | null>(null)
   const [textareaMaxHeight, setTextareaMaxHeight] = useState<number | undefined>(undefined)
   const [attachmentPreviewMaxHeight, setAttachmentPreviewMaxHeight] = useState<number | undefined>(
@@ -266,8 +332,16 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
   )
 
   useEffect(() => {
+    const syncKeyChanged = inputSyncKey !== lastInputSyncRef.current.key
+    const valueChanged = inputValue !== lastInputSyncRef.current.value
+    if (!syncKeyChanged && !valueChanged) return
+
+    lastInputSyncRef.current = { key: inputSyncKey, value: inputValue }
     committedInputValueRef.current = inputValue
-  }, [inputValue])
+    if (isComposingInputRef.current && !syncKeyChanged) return
+
+    setLocalInputValue(inputValue)
+  }, [inputSyncKey, inputValue])
 
   useEffect(() => {
     if (active) return
@@ -349,7 +423,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
     pendingInputSelectionRef.current = null
     const input = composerInputRef.current
     if (!input || document.activeElement !== input) return
-    if (!pendingSelection && (isComposingInputRef.current || input.value !== selection.value))
+    if (isComposingInputRef.current || (!pendingSelection && input.value !== selection.value))
       return
 
     restoreInputSelection(selection)
@@ -389,6 +463,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
     committedInputValueRef.current = nextValue
     latestInputSelectionRef.current = nextSelection
     pendingInputSelectionRef.current = nextSelection
+    setLocalInputValue(nextValue)
     onInputChange(nextValue)
   }
 
@@ -400,10 +475,23 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
     event: React.CompositionEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
     isComposingInputRef.current = false
+    const nextValue = event.currentTarget.value
+    const previousValue = committedInputValueRef.current
+    committedInputValueRef.current = nextValue
+    setLocalInputValue(nextValue)
     latestInputSelectionRef.current = readInputSelectionSnapshot(event.currentTarget)
+    if (nextValue !== previousValue) {
+      onInputChange(nextValue)
+    }
   }
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
+    const nativeEvent = event.nativeEvent as KeyboardEvent & { isComposing?: boolean }
+    const isImeComposing =
+      isComposingInputRef.current || nativeEvent.isComposing || nativeEvent.keyCode === 229
+
+    if (isImeComposing) return
+
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       onSend()
@@ -447,6 +535,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
     committedInputValueRef.current = nextValue
     latestInputSelectionRef.current = nextSelection
     pendingInputSelectionRef.current = nextSelection
+    setLocalInputValue(nextValue)
     onInputChange(nextValue)
 
     const restoreDropSelection = () => {
@@ -466,7 +555,10 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
   }
 
   const handleInsertToolCommand = (tool: MagicPotAppToolDescriptor) => {
-    onInputChange(buildToolCommandDraft(tool))
+    const nextValue = buildToolCommandDraft(tool)
+    committedInputValueRef.current = nextValue
+    setLocalInputValue(nextValue)
+    onInputChange(nextValue)
     composerInputRef.current?.focus()
   }
 
@@ -482,8 +574,8 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
   const resolvedTextareaMaxHeight = textareaMaxHeight != null ? `${textareaMaxHeight}px` : '40vh'
   const resolvedAttachmentPreviewMaxHeight =
     attachmentPreviewMaxHeight != null ? `${attachmentPreviewMaxHeight}px` : '32vh'
-  const isToolCommandMode = inputValue.trimStart().startsWith('/tool')
-  const requestedToolName = inputValue
+  const isToolCommandMode = localInputValue.trimStart().startsWith('/tool')
+  const requestedToolName = localInputValue
     .trimStart()
     .match(/^\/tool\s+([a-z0-9._-]+)/i)?.[1]
     ?.trim()
@@ -491,7 +583,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
     requestedToolName && toolHelpItems.length > 0
       ? toolHelpItems.find((tool) => tool.name === requestedToolName) || null
       : null
-  const parsedToolCommand = isToolCommandMode ? parseExplicitToolCommand(inputValue) : null
+  const parsedToolCommand = isToolCommandMode ? parseExplicitToolCommand(localInputValue) : null
   const selectedToolInputSchemaSummary = selectedToolHelpItem
     ? buildToolInputSchemaSummary(selectedToolHelpItem)
     : undefined
@@ -741,10 +833,8 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
           <Box sx={{ width: '100%', minHeight: 0, mb: 1 }}>
             <TextField
               fullWidth
-              multiline
-              minRows={1}
               inputRef={composerInputRef}
-              value={inputValue}
+              value={localInputValue}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
               placeholder=""
@@ -752,6 +842,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
               variant="standard"
               InputProps={{
                 disableUnderline: true,
+                inputComponent: StableNativeTextarea as React.ElementType<InputBaseComponentProps>,
                 startAdornment: selectedSkillName ? (
                   <Box
                     contentEditable={false}
@@ -805,6 +896,7 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
               }}
               inputProps={{
                 'data-testid': 'chat-composer-input',
+                rows: 1,
                 onFocus: handleInputSelectionChange,
                 onBeforeInput: handleBeforeInput,
                 onKeyUp: handleInputSelectionChange,
@@ -826,12 +918,20 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
                 }
               }}
               sx={{
-                '& .MuiInputBase-root.MuiInputBase-multiline': {
+                '& .MuiInputBase-root': {
                   alignItems: 'flex-start',
                   maxHeight: resolvedTextareaMaxHeight,
                   overflow: 'hidden',
                   display: 'flex',
-                  flexWrap: 'wrap'
+                  flexWrap: 'wrap',
+                  '&:focus': {
+                    outline: 'none',
+                    boxShadow: 'none'
+                  },
+                  '&:focus-within': {
+                    outline: 'none',
+                    boxShadow: 'none'
+                  }
                 },
                 '& .MuiInputBase-input': {
                   py: 0.5,
@@ -846,16 +946,6 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
                   flex: '1 1 auto',
                   minWidth: 100,
                   '&:focus': {
-                    outline: 'none',
-                    boxShadow: 'none'
-                  }
-                },
-                '& .MuiInputBase-root': {
-                  '&:focus': {
-                    outline: 'none',
-                    boxShadow: 'none'
-                  },
-                  '&:focus-within': {
                     outline: 'none',
                     boxShadow: 'none'
                   }
@@ -1071,25 +1161,27 @@ const ChatComposer: React.FC<ChatComposerProps> = ({
                 <IconButton
                   data-chat-send-btn
                   onClick={() => {
-                    if (inputValue.trim() || pendingAttachments.length > 0) {
+                    if (localInputValue.trim() || pendingAttachments.length > 0) {
                       onSend()
                     }
                   }}
-                  disabled={disabled || (!inputValue.trim() && pendingAttachments.length === 0)}
+                  disabled={
+                    disabled || (!localInputValue.trim() && pendingAttachments.length === 0)
+                  }
                   sx={{
                     bgcolor:
-                      inputValue.trim() || pendingAttachments.length > 0
+                      localInputValue.trim() || pendingAttachments.length > 0
                         ? 'primary.main'
                         : 'transparent',
                     color:
-                      inputValue.trim() || pendingAttachments.length > 0
+                      localInputValue.trim() || pendingAttachments.length > 0
                         ? 'primary.contrastText'
                         : 'text.secondary',
                     width: 36,
                     height: 36,
                     '&:hover': {
                       bgcolor:
-                        inputValue.trim() || pendingAttachments.length > 0
+                        localInputValue.trim() || pendingAttachments.length > 0
                           ? 'primary.dark'
                           : 'action.hover'
                     },
