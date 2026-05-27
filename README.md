@@ -1,4 +1,4 @@
-# MagicPot
+# MagicPot-Web
 
 MagicPot 原项目的 Web 服务器版本，包含公司内网 Web 工作台、账号登录、管理后台和远程 ComfyUI 调用等扩展。
 
